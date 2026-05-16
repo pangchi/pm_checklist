@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Personnel — PM Checklist{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Personnel</h1>
+</div>
+
+<div class="two-col">
+  <section class="card">
+    <h2>Add Personnel</h2>
+    <form method="POST" action="{{ url_for('personnel_add') }}" class="form-grid">
+      <div class="field">
+        <label>Full Name *</label>
+        <input type="text" name="name" required placeholder="Full name">
+      </div>
+      <div class="field">
+        <label>Badge / Employee ID *</label>
+        <input type="text" name="badge" required placeholder="EMP-001">
+      </div>
+      <div class="field">
+        <label>Department</label>
+        <input type="text" name="department" placeholder="Maintenance">
+      </div>
+      <button type="submit" class="btn btn-primary">Add Personnel</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Personnel List</h2>
+    {% if people %}
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Name</th><th>Badge</th><th>Department</th></tr></thead>
+        <tbody>
+          {% for p in people %}
+          <tr>
+            <td>{{ p.name }}</td>
+            <td><code>{{ p.badge }}</code></td>
+            <td>{{ p.department or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-list">
+      {% for p in people %}
+      <div class="card-item">
+        <div class="card-item-title">
+          <span>{{ p.name }}</span>
+          <code>{{ p.badge }}</code>
+        </div>
+        {% if p.department %}
+        <div class="card-item-meta">🏭 {{ p.department }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    {% else %}
+      <p class="empty-msg">No personnel added yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

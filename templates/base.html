@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>{% block title %}PM Checklist{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <nav class="topnav">
+    <a href="{{ url_for('index') }}" class="nav-brand">⚙ PM<span>Checklist</span></a>
+    <div class="nav-links">
+      <a href="{{ url_for('session_start') }}" class="nav-btn">+ New Session</a>
+      <a href="{{ url_for('wo_list') }}">Work Orders</a>
+      <a href="{{ url_for('personnel_list') }}">Personnel</a>
+    </div>
+    <button class="nav-hamburger" id="hamburger" aria-label="Menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </nav>
+
+  <div class="nav-drawer" id="nav-drawer" role="navigation">
+    <a href="{{ url_for('session_start') }}" class="drawer-btn">＋ New PM Session</a>
+    <a href="{{ url_for('index') }}">🏠 Dashboard</a>
+    <a href="{{ url_for('wo_list') }}">📋 Work Orders</a>
+    <a href="{{ url_for('personnel_list') }}">👷 Personnel</a>
+  </div>
+
+  <div class="flash-container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash flash-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+  </div>
+
+  <main>{% block content %}{% endblock %}</main>
+
+  <footer><span>PM Checklist System</span></footer>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  <script>
+  // ── Hamburger menu ──────────────────────────────────────────
+  (function() {
+    const btn    = document.getElementById('hamburger');
+    const drawer = document.getElementById('nav-drawer');
+    if (!btn || !drawer) return;
+    btn.addEventListener('click', function() {
+      const open = drawer.classList.toggle('open');
+      btn.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', open);
+    });
+    // Close on backdrop tap
+    document.addEventListener('click', function(e) {
+      if (!btn.contains(e.target) && !drawer.contains(e.target)) {
+        drawer.classList.remove('open');
+        btn.classList.remove('open');
+        btn.setAttribute('aria-expanded', false);
+      }
+    });
+    // Close on nav link tap
+    drawer.querySelectorAll('a').forEach(function(a) {
+      a.addEventListener('click', function() {
+        drawer.classList.remove('open');
+        btn.classList.remove('open');
+      });
+    });
+  })();
+
+  // ── Browser timezone detection ──────────────────────────────
+  (function() {
+    const offset = -new Date().getTimezoneOffset();
+    const m = document.cookie.match(/tz_offset=(-?\d+)/);
+    const stored = m ? parseInt(m[1]) : NaN;
+    if (isNaN(stored) || stored !== offset) {
+      fetch('/api/tz', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({offset: offset})
+      }).then(function() {
+        if (!isNaN(stored) && stored !== offset) location.reload();
+      });
+    }
+    window.browserTzOffset = offset;
+  })();
+
+  // ── UTC ISO → browser local string ─────────────────────────
+  window.fmtUTC = function(isoStr, withDate) {
+    if (!isoStr) return '';
+    var s = isoStr;
+    if (!s.includes('Z') && !s.includes('+')) s += 'Z';
+    var d = new Date(s);
+    if (withDate === false) {
+      return d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+    }
+    return d.toLocaleString(undefined, {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+  };
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,55 @@
+# Monthly Preventive Maintenance Checklist
+# Frequency: Monthly | Est. Duration: 1–2 hours
+
+SECTION: Safety & Permit Verification
+
+NOTE: Obtain permit-to-work before starting. Verify all isolations are in place.
+STEP: Permit-to-work obtained and signed
+STEP: Lock Out / Tag Out (LOTO) applied
+STEP: Safety data sheets (SDS) reviewed for chemicals in use
+STEP_VALUE: Record ambient temperature (°C)
+STEP_VALUE: Record ambient humidity (%RH)
+
+SECTION: Visual Inspection
+
+STEP: Inspect equipment exterior for damage, leaks, or corrosion
+STEP: Check all labels, warning signs, and safety stickers are legible
+STEP: Verify all guards and covers are in good condition
+PHOTO: Photograph overall equipment condition
+
+SECTION: Mechanical Checks
+
+STEP: Inspect all mechanical fasteners — tighten any loose bolts/screws
+STEP: Check belts, chains, and drives for wear or misalignment
+STEP_VALUE: Record belt tension measurement (N or Hz)
+STEP: Inspect all hoses and tubing for cracks or leaks
+STEP: Clean all air vents and filters
+
+SECTION: Electrical Checks
+
+STEP: Inspect power cables and connectors for damage
+STEP: Verify all indicator lights and alarms are functional
+STEP_VALUE: Measure and record supply voltage (VAC)
+STEP: Test emergency stop (E-Stop) — verify correct operation
+
+SECTION: Lubrication & Consumables
+
+STEP_VALUE: Record lubricant type used
+STEP_VALUE: Record lubricant quantity applied (mL)
+STEP: Lubricate all designated points per maintenance schedule
+PHOTO: Photograph lubrication points after servicing
+
+SECTION: Functional Test
+
+STEP: Power on equipment and observe startup — no abnormal sounds or alarms
+STEP_VALUE: Record startup time (seconds)
+STEP: Run equipment through one complete operating cycle
+STEP_VALUE: Record operating current during run (A)
+
+SECTION: Close-Out
+
+STEP: Work area cleaned, all tools accounted for
+STEP: LOTO removed and equipment returned to service
+STEP_VALUE: Record total maintenance duration (minutes)
+PHOTO: Photograph final equipment condition
+STEP: Work order updated with findings and corrective actions

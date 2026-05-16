@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Report — {{ pm_session.wo_number }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>PM Report</h1>
+  <button onclick="window.print()" class="btn btn-outline">🖨 Print</button>
+</div>
+
+<div class="report-meta card">
+  <div class="report-grid">
+    <div><label>Work Order</label><code>{{ pm_session.wo_number }}</code></div>
+    <div><label>Equipment</label>{{ pm_session.equipment }}</div>
+    <div><label>Technician</label>{{ pm_session.personnel_name }} ({{ pm_session.badge }})</div>
+    <div><label>Status</label><span class="badge badge-{{ pm_session.status }}">{{ pm_session.status.replace('_',' ').title() }}</span></div>
+    <div><label>Checklist</label><span class="checklist-tag">{{ pm_session.template_name | replace('_',' ') | replace('.txt','') | title }}</span></div>
+    <div><label>Started</label>{{ pm_session.started_at | localdt }}</div>
+    <div><label>Completed</label>{{ pm_session.completed_at | localdt if pm_session.completed_at else 'In Progress' }}</div>
+  </div>
+</div>
+
+{% set events_by_section = {} %}
+{% for e in events %}
+  {% if e.section_index not in events_by_section %}
+    {% set _ = events_by_section.update({e.section_index: []}) %}
+  {% endif %}
+  {% set _ = events_by_section[e.section_index].append(e) %}
+{% endfor %}
+
+{% for section in sections %}
+  {% set sec_events = events_by_section.get(section.index, []) %}
+  <section class="card report-section">
+    <h3>{{ loop.index }}. {{ section.title }}</h3>
+    {% if sec_events %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Step</th>
+          <th>Type</th>
+          <th>Value / Photo</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in sec_events %}
+        <tr>
+          <td>{{ e.step_label }}</td>
+          <td><span class="step-type-badge type-{{ e.step_type|lower }}">{{ e.step_type }}</span></td>
+          <td>
+            {% if e.value_input %}
+              <strong>{{ e.value_input }}</strong>
+            {% elif e.photo_path %}
+              <a href="{{ url_for('uploaded_file', filename=e.photo_path) }}" target="_blank">
+                📷 View Photo
+              </a>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td><code>{{ e.timestamp | localdt }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted">No steps recorded for this section.</p>
+    {% endif %}
+  </section>
+{% endfor %}
+
+<div class="report-footer">
+  <a href="{{ url_for('index') }}" class="btn btn-outline">← Dashboard</a>
+</div>
+{% endblock %}

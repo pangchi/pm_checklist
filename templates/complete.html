@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Session Complete{% endblock %}
+{% block content %}
+<div class="complete-wrap">
+  <div class="complete-icon">✓</div>
+  <h1>Checklist Complete!</h1>
+  <p class="complete-sub">All sections have been signed off and recorded.</p>
+
+  <div class="complete-summary card">
+    <div class="summary-row"><span>Work Order</span><code>{{ pm_session.wo_number }}</code></div>
+    <div class="summary-row"><span>Equipment</span><strong>{{ pm_session.equipment }}</strong></div>
+    <div class="summary-row"><span>Technician</span>{{ pm_session.personnel_name }} ({{ pm_session.badge }})</div>
+    <div class="summary-row"><span>Started</span>{{ pm_session.started_at | localdt }}</div>
+    <div class="summary-row"><span>Completed</span>{{ pm_session.completed_at | localdt if pm_session.completed_at else '—' }}</div>
+    <div class="summary-row"><span>Steps Recorded</span>{{ events|length }}</div>
+  </div>
+
+  <div class="complete-actions">
+    <a href="{{ url_for('session_report', session_id=pm_session.id) }}" class="btn btn-primary">View Full Report</a>
+    <a href="{{ url_for('index') }}" class="btn btn-outline">Back to Dashboard</a>
+    <a href="{{ url_for('session_start') }}" class="btn btn-outline">New Session</a>
+  </div>
+</div>
+{% endblock %}

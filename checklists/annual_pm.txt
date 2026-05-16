@@ -1,0 +1,99 @@
+# Annual Preventive Maintenance Checklist
+# Frequency: Yearly | Est. Duration: Full day (8–12 hours)
+
+SECTION: Pre-Shutdown Planning
+
+NOTE: Annual PM requires full equipment shutdown. Coordinate with production planning at least 1 week in advance.
+STEP: Shutdown plan reviewed and approved by engineering
+STEP: All required spare parts and materials confirmed on-hand
+STEP_VALUE: Record planned shutdown date and time
+STEP: Permit-to-work issued and signed by safety officer
+STEP: Lock Out / Tag Out (LOTO) applied — all energy sources isolated
+PHOTO: Photograph all LOTO tags and isolation points
+
+SECTION: Full Disassembly Inspection
+
+STEP: Remove all access panels and covers
+STEP: Inspect all internal structural components for cracks, corrosion, or fatigue
+STEP_VALUE: Record any structural defects found (None / Minor / Major)
+STEP: Inspect all internal wiring harnesses — replace if chafed or brittle
+STEP: Photograph and document all wear-critical components before replacement
+PHOTO: Photograph internal components before cleaning
+
+SECTION: Complete Mechanical Overhaul
+
+STEP: Replace all scheduled-replacement wear parts per OEM annual list
+STEP_VALUE: Record all parts replaced (attach parts list if needed)
+STEP: Replace all bearings on annual replacement schedule
+STEP_VALUE: Record bearing part numbers replaced
+STEP: Replace all drive belts and couplings
+STEP: Replace all seals, O-rings, and gaskets throughout
+STEP: Replace all filters (air, oil, hydraulic, process)
+STEP_VALUE: Record total number of filters replaced
+PHOTO: Photograph replaced components
+
+SECTION: Full Electrical Service
+
+STEP: Inspect and clean all control panels — vacuum dust from enclosures
+STEP: Inspect and re-torque all terminal block connections
+STEP_VALUE: Measure insulation resistance on all motor windings (MΩ)
+STEP: Test and verify all safety relays and interlocks
+STEP: Replace any UPS or backup batteries as per schedule
+STEP: Perform thermographic scan of all electrical panels if available
+PHOTO: Photograph electrical panels after service
+
+SECTION: Fluid System Full Drain & Refill
+
+STEP: Drain all hydraulic, lubrication, and cooling fluids completely
+STEP: Flush all fluid circuits before refilling
+STEP_VALUE: Record flush fluid type and volume (L)
+STEP: Refill with fresh fluids per OEM specification
+STEP_VALUE: Record new fluid type, grade, and volume (L)
+STEP: Bleed and purge all air from fluid systems
+STEP_VALUE: Record system pressure after refill (bar / PSI)
+
+SECTION: Calibration & Instrumentation
+
+NOTE: All instruments must be calibrated by a certified technician or external lab.
+STEP: Submit all process instruments for annual calibration
+STEP_VALUE: Record calibration certificate numbers (attach copies)
+STEP: Update calibration stickers on all instruments
+STEP: Test and calibrate all safety pressure relief and overpressure devices
+STEP_VALUE: Record relief valve set pressure verified (bar / PSI)
+PHOTO: Photograph calibration stickers on instruments
+
+SECTION: Reassembly & Torque Verification
+
+STEP: Reassemble all components per OEM torque specifications
+STEP_VALUE: Record torque wrench ID / calibration date used
+STEP: Verify all fastener torques with secondary check
+STEP: Reinstall all guards, covers, and access panels
+STEP: Verify all warning labels and safety signs are in place
+
+SECTION: Commissioning & Performance Verification
+
+STEP: Remove LOTO — follow lockout removal procedure
+STEP: Power on and verify startup sequence — no abnormal alarms
+STEP_VALUE: Record startup time (seconds)
+STEP: Run equipment at low speed / partial load — check for leaks, noise, vibration
+STEP_VALUE: Record vibration level at key measurement points (mm/s RMS)
+STEP: Ramp to full operating conditions
+STEP_VALUE: Record peak operating temperature (°C)
+STEP_VALUE: Record operating current at full load (A)
+STEP_VALUE: Record cycle time at full load (seconds)
+STEP: Run for minimum 2-hour soak test — monitor all parameters
+STEP_VALUE: Record soak test duration (hours)
+STEP: Verify all alarms, interlocks, and safety devices are functional
+STEP: Confirm handshake with control system / MES
+PHOTO: Photograph equipment operating at full load
+
+SECTION: Documentation & Sign-Off
+
+STEP: All replaced parts, fluids, and calibrations logged in maintenance system
+STEP: Maintenance report completed and attached to work order
+STEP: All tools, equipment, and temporary fixtures removed from work area
+STEP: Area cleaned and restored to normal operating condition
+STEP_VALUE: Record total maintenance duration (hours)
+PHOTO: Photograph final equipment condition — all panels closed
+STEP: Report reviewed and signed off by maintenance supervisor
+STEP: Equipment formally handed back to production

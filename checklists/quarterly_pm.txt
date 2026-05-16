@@ -1,0 +1,80 @@
+# Quarterly Preventive Maintenance Checklist
+# Frequency: Every 3 months | Est. Duration: 3–5 hours
+
+SECTION: Safety & Permit Verification
+
+NOTE: Quarterly PM requires additional isolation review. Confirm with shift supervisor before proceeding.
+STEP: Permit-to-work obtained and signed by supervisor
+STEP: Lock Out / Tag Out (LOTO) applied and verified by second person
+STEP: Safety data sheets (SDS) reviewed for all chemicals/lubricants
+STEP_VALUE: Record ambient temperature (°C)
+STEP_VALUE: Record ambient humidity (%RH)
+PHOTO: Photograph LOTO tags in place
+
+SECTION: Visual & Structural Inspection
+
+STEP: Inspect all structural welds and frames for cracks
+STEP: Check all seals and gaskets — replace if worn or hardened
+STEP: Inspect all guards, interlocks, and safety devices
+STEP: Verify equipment leveling — check and adjust if needed
+STEP_VALUE: Record equipment level reading (mm/m)
+PHOTO: Photograph any damaged or worn components found
+
+SECTION: Mechanical Overhaul
+
+STEP: Remove and inspect all filters — replace if required
+STEP_VALUE: Record filter condition (Good / Marginal / Replaced)
+STEP: Inspect and re-torque all critical fasteners per torque spec
+STEP_VALUE: Record torque spec used (N·m)
+STEP: Inspect bearings for noise, play, or heat — replace if necessary
+STEP_VALUE: Record bearing condition (Good / Replaced)
+STEP: Inspect all drive belts and couplings — replace as needed
+PHOTO: Photograph mechanical components after inspection
+
+SECTION: Electrical & Instrumentation
+
+STEP: Inspect all terminal blocks and connectors — tighten as needed
+STEP: Test all limit switches and proximity sensors
+STEP: Calibrate or verify calibration of all process instruments
+STEP_VALUE: Record instrument calibration due date
+STEP_VALUE: Measure supply voltage (VAC)
+STEP_VALUE: Measure insulation resistance (MΩ)
+STEP: Test all safety interlocks and alarms
+
+SECTION: Fluid Systems
+
+STEP: Inspect hydraulic/pneumatic lines for leaks or abrasion
+STEP_VALUE: Record system pressure at operating point (bar / PSI)
+STEP: Drain and replace fluids per schedule
+STEP_VALUE: Record fluid type and volume replaced (L)
+STEP: Inspect all valves for correct operation and no internal leakage
+PHOTO: Photograph fluid system after service
+
+SECTION: Lubrication Full Service
+
+NOTE: Use only approved lubricants specified in the equipment manual.
+STEP_VALUE: Record lubricant specification (type and grade)
+STEP: Clean all old grease/oil from lubrication points before re-greasing
+STEP: Lubricate all points per the quarterly schedule
+STEP_VALUE: Record total lubricant quantity used (mL)
+
+SECTION: Performance & Functional Test
+
+STEP: Power on equipment — verify startup sequence is normal
+STEP_VALUE: Record startup time (seconds)
+STEP: Run full operating cycle — record any abnormalities
+STEP_VALUE: Record peak operating temperature (°C)
+STEP_VALUE: Record operating current at full load (A)
+STEP_VALUE: Record cycle time (seconds)
+STEP: Verify all alarms, interlocks, and safety devices activate correctly
+STEP: Confirm communication with control system / MES is normal
+PHOTO: Photograph equipment in operating condition
+
+SECTION: Close-Out & Documentation
+
+STEP: All replaced parts and consumables logged in maintenance record
+STEP: Area cleaned and all tools and spare parts accounted for
+STEP: LOTO removed and equipment signed back into service
+STEP_VALUE: Record total maintenance duration (minutes)
+PHOTO: Photograph final equipment condition
+STEP: Maintenance report submitted to supervisor for review

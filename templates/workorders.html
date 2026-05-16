@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Work Orders — PM Checklist{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Work Orders</h1>
+</div>
+
+<div class="two-col">
+  <section class="card">
+    <h2>Create Work Order</h2>
+    <p class="field-hint">WO number auto-generated (e.g. <code>WO-{{ today }}-001</code>).</p>
+    <form method="POST" action="{{ url_for('wo_add') }}" class="form-grid">
+      <div class="field">
+        <label>Equipment Name *</label>
+        <input type="text" name="equipment" required placeholder="e.g. Air Compressor Unit 3">
+      </div>
+      <div class="field">
+        <label>Checklist Type *</label>
+        <select name="checklist_name" required>
+          <option value="">— Select Checklist —</option>
+          {% for cl in checklists %}
+          <option value="{{ cl.filename }}">{{ cl.display }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Description</label>
+        <textarea name="description" rows="2" placeholder="Brief description..."></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">Create Work Order</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Work Orders</h2>
+    {% if wos %}
+
+    {# Desktop table #}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr><th>WO #</th><th>Equipment</th><th>Checklist</th><th>Status</th><th>Created</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          {% for w in wos %}
+          <tr>
+            <td><code>{{ w.wo_number }}</code></td>
+            <td>{{ w.equipment }}</td>
+            <td><span class="checklist-tag">{{ w.checklist_name | replace('_',' ') | replace('.txt','') | title }}</span></td>
+            <td>
+              <span class="badge badge-{{ w.status }}">{{ w.status.replace('_',' ').title() }}</span>
+              {% if w.active_session_id %}<span class="badge-live">LIVE</span>{% endif %}
+            </td>
+            <td>{{ w.created_at | localdt('%Y-%m-%d') }}</td>
+            <td>
+              {% if w.active_session_id %}
+                <a href="{{ url_for('checklist_view', session_id=w.active_session_id) }}" class="btn btn-sm btn-primary">Resume</a>
+              {% elif w.status == 'open' %}
+                <a href="{{ url_for('session_start') }}" class="btn btn-sm btn-outline">Start PM</a>
+              {% elif w.status == 'completed' and w.latest_session_id %}
+                <a href="{{ url_for('session_report', session_id=w.latest_session_id) }}" class="btn btn-sm btn-outline">Report</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# Mobile card-list #}
+    <div class="card-list">
+      {% for w in wos %}
+      <div class="card-item">
+        <div class="card-item-title">
+          <code>{{ w.wo_number }}</code>
+          <span class="badge badge-{{ w.status }}">{{ w.status.replace('_',' ').title() }}{% if w.active_session_id %} 🔴{% endif %}</span>
+        </div>
+        <div class="card-item-meta">
+          <span>🔧 {{ w.equipment }}</span>
+          <span class="checklist-tag">{{ w.checklist_name | replace('_',' ') | replace('.txt','') | title }}</span>
+          <span>📅 {{ w.created_at | localdt('%Y-%m-%d') }}</span>
+        </div>
+        <div class="card-item-footer">
+          <span></span>
+          {% if w.active_session_id %}
+            <a href="{{ url_for('checklist_view', session_id=w.active_session_id) }}" class="btn btn-sm btn-primary">Resume →</a>
+          {% elif w.status == 'open' %}
+            <a href="{{ url_for('session_start') }}" class="btn btn-sm btn-outline">Start PM</a>
+          {% elif w.status == 'completed' and w.latest_session_id %}
+            <a href="{{ url_for('session_report', session_id=w.latest_session_id) }}" class="btn btn-sm btn-outline">Report</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% else %}
+      <p class="empty-msg">No work orders yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Start PM Session{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Start PM Session</h1>
+</div>
+
+<div class="center-form">
+  <section class="card">
+    <h2>Session Setup</h2>
+    {% if not people %}
+      <div class="alert alert-warn">⚠ No personnel found. <a href="{{ url_for('personnel_list') }}">Add personnel first →</a></div>
+    {% endif %}
+    {% if not wos %}
+      <div class="alert alert-warn">⚠ No open work orders. <a href="{{ url_for('wo_list') }}">Create a work order first →</a></div>
+    {% endif %}
+
+    <form method="POST" class="form-grid" id="start-form">
+      <div class="field">
+        <label>Work Order *</label>
+        <select name="wo_id" id="wo-select" required {% if not wos %}disabled{% endif %} onchange="checkActiveSession(this)">
+          <option value="">— Select Work Order —</option>
+          {% for w in wos %}
+          <option value="{{ w.id }}"
+                  data-active="{{ w.active_session_id or '' }}"
+                  data-active-by="{{ w.active_session_personnel or '' }}"
+                  data-checklist="{{ w.checklist_name | replace('_',' ') | replace('.txt','') | title }}">
+            {{ w.wo_number }} — {{ w.equipment }}
+            [{{ w.checklist_name | replace('_',' ') | replace('.txt','') | title }}]
+            {% if w.active_session_id %}⚠ ACTIVE{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        <div id="checklist-info" class="field-hint" style="display:none; margin-top:0.4rem;"></div>
+        <div id="active-session-warn" class="alert alert-warn" style="display:none; margin-top:0.5rem;"></div>
+      </div>
+
+      <div class="field">
+        <label>Technician / Personnel *</label>
+        <select name="personnel_id" required {% if not people %}disabled{% endif %}>
+          <option value="">— Select Personnel —</option>
+          {% for p in people %}
+          <option value="{{ p.id }}">{{ p.name }} ({{ p.badge }}){% if p.department %} — {{ p.department }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button type="submit" id="start-btn" class="btn btn-primary btn-large"
+              {% if not people or not wos %}disabled{% endif %}>
+        Start Checklist →
+      </button>
+    </form>
+  </section>
+</div>
+
+<script>
+function checkActiveSession(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  const activeId  = opt.dataset.active;
+  const activeBy  = opt.dataset.activeBy;
+  const checklist = opt.dataset.checklist;
+  const warn      = document.getElementById('active-session-warn');
+  const info      = document.getElementById('checklist-info');
+  const btn       = document.getElementById('start-btn');
+
+  if (checklist) {
+    info.style.display = 'block';
+    info.textContent = '📋 Checklist: ' + checklist;
+  } else {
+    info.style.display = 'none';
+  }
+
+  if (activeId) {
+    warn.style.display = 'block';
+    warn.innerHTML = `⚠ This work order already has an active session (started by <strong>${activeBy || 'another technician'}</strong>). ` +
+      `Submitting will resume that session. <a href="/session/${activeId}/checklist">Go directly →</a>`;
+    btn.textContent = 'Resume Existing Session →';
+  } else {
+    warn.style.display = 'none';
+    btn.textContent = 'Start Checklist →';
+  }
+}
+</script>
+{% endblock %}

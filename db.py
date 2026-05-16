@@ -1,0 +1,398 @@
+"""
+db.py — Database layer for PM Checklist application.
+Auto-creates all required tables on first run.
+"""
+
+import psycopg2
+import psycopg2.extras
+from contextlib import contextmanager
+import configparser
+import os
+from datetime import datetime
+
+_config = None
+
+def load_config(config_path="config.ini"):
+    global _config
+    _config = configparser.ConfigParser()
+    _config.read(config_path)
+    return _config
+
+
+def get_dsn():
+    db = _config["database"]
+    return {
+        "host": db["host"],
+        "port": int(db["port"]),
+        "dbname": db["name"],
+        "user": db["user"],
+        "password": db["password"],
+    }
+
+
+@contextmanager
+def get_conn():
+    """All timestamps stored as TIMESTAMPTZ (UTC). Display conversion is browser-side."""
+    conn = psycopg2.connect(**get_dsn())
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def init_db():
+    """Create database and all tables if they don't exist."""
+    # First connect to 'postgres' default db to create our db if needed
+    db = _config["database"]
+    try:
+        conn = psycopg2.connect(
+            host=db["host"],
+            port=int(db["port"]),
+            dbname="postgres",
+            user=db["user"],
+            password=db["password"],
+        )
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM pg_database WHERE datname = %s", (db["name"],)
+        )
+        if not cur.fetchone():
+            cur.execute(f'CREATE DATABASE "{db["name"]}"')
+            print(f"[DB] Created database: {db['name']}")
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] Warning during DB creation check: {e}")
+
+    # Now create tables
+    ddl = """
+    CREATE TABLE IF NOT EXISTS personnel (
+        id          SERIAL PRIMARY KEY,
+        name        TEXT NOT NULL,
+        badge       TEXT UNIQUE NOT NULL,
+        department  TEXT,
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS work_orders (
+        id             SERIAL PRIMARY KEY,
+        wo_number      TEXT UNIQUE NOT NULL,
+        equipment      TEXT NOT NULL,
+        description    TEXT,
+        checklist_name TEXT NOT NULL DEFAULT 'weekly_pm.txt',
+        status         TEXT DEFAULT 'open',   -- open, in_progress, completed
+        created_at     TIMESTAMPTZ DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS pm_sessions (
+        id            SERIAL PRIMARY KEY,
+        wo_id         INTEGER REFERENCES work_orders(id),
+        personnel_id  INTEGER REFERENCES personnel(id),
+        template_name TEXT NOT NULL,
+        status        TEXT DEFAULT 'in_progress',  -- in_progress, completed
+        started_at    TIMESTAMPTZ DEFAULT NOW(),
+        completed_at  TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS checklist_events (
+        id            SERIAL PRIMARY KEY,
+        session_id    INTEGER REFERENCES pm_sessions(id) ON DELETE CASCADE,
+        section_index INTEGER NOT NULL,
+        step_index    INTEGER NOT NULL,
+        step_key      TEXT NOT NULL,
+        step_type     TEXT NOT NULL,      -- STEP, STEP_VALUE, PHOTO
+        step_label    TEXT NOT NULL,
+        checked       BOOLEAN DEFAULT TRUE,
+        value_input   TEXT,
+        photo_path    TEXT,
+        timestamp     TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_events_session ON checklist_events(session_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_wo    ON pm_sessions(wo_id);
+    """
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(ddl)
+        # Migration: add checklist_name column if missing
+        cur.execute("""
+            ALTER TABLE work_orders
+            ADD COLUMN IF NOT EXISTS checklist_name TEXT NOT NULL DEFAULT 'weekly_pm.txt'
+        """)
+        # Migration: ensure timestamp columns are TIMESTAMPTZ (UTC-aware)
+        for tbl_col in [
+            ("personnel",        "created_at"),
+            ("work_orders",      "created_at"),
+            ("work_orders",      "updated_at"),
+            ("pm_sessions",      "started_at"),
+            ("pm_sessions",      "completed_at"),
+            ("checklist_events", "timestamp"),
+        ]:
+            cur.execute(f"""
+                ALTER TABLE {tbl_col[0]}
+                ALTER COLUMN {tbl_col[1]} TYPE TIMESTAMPTZ
+                USING {tbl_col[1]} AT TIME ZONE 'UTC'
+            """)
+        cur.close()
+    print("[DB] Tables verified/created. All timestamps stored in UTC (TIMESTAMPTZ).")
+
+
+# ─── Personnel ────────────────────────────────────────────────────────────────
+
+def get_all_personnel():
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM personnel ORDER BY name")
+        return cur.fetchall()
+
+
+def add_personnel(name, badge, department=""):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "INSERT INTO personnel (name, badge, department) VALUES (%s,%s,%s) RETURNING *",
+            (name, badge, department),
+        )
+        return cur.fetchone()
+
+
+def get_personnel(pid):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM personnel WHERE id=%s", (pid,))
+        return cur.fetchone()
+
+
+# ─── Work Orders ──────────────────────────────────────────────────────────────
+
+def get_all_work_orders():
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM work_orders ORDER BY created_at DESC")
+        return cur.fetchall()
+
+
+def get_all_work_orders_enriched():
+    """Work orders joined with their active/latest session IDs."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT
+                w.*,
+                active.id            AS active_session_id,
+                active.personnel_name AS active_session_personnel,
+                latest.id            AS latest_session_id
+            FROM work_orders w
+            LEFT JOIN LATERAL (
+                SELECT s.id, p.name AS personnel_name
+                FROM pm_sessions s
+                JOIN personnel p ON p.id = s.personnel_id
+                WHERE s.wo_id = w.id AND s.status = 'in_progress'
+                ORDER BY s.started_at DESC LIMIT 1
+            ) active ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT id FROM pm_sessions
+                WHERE wo_id = w.id
+                ORDER BY started_at DESC LIMIT 1
+            ) latest ON TRUE
+            ORDER BY w.created_at DESC
+        """)
+        return cur.fetchall()
+
+
+def generate_wo_number():
+    """Generate WO number: WO-YYYYMMDD-NNN, incrementing daily sequence."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        prefix = datetime.now().strftime("WO-%Y%m%d-")
+        cur.execute(
+            "SELECT wo_number FROM work_orders WHERE wo_number LIKE %s ORDER BY wo_number DESC LIMIT 1",
+            (prefix + "%",),
+        )
+        row = cur.fetchone()
+        if row:
+            try:
+                seq = int(row[0].split("-")[-1]) + 1
+            except (ValueError, IndexError):
+                seq = 1
+        else:
+            seq = 1
+        return f"{prefix}{seq:03d}"
+
+
+def add_work_order(equipment, description="", checklist_name="weekly_pm.txt"):
+    """Create a new work order with an auto-generated WO number."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # Generate number inside the same connection to avoid races
+        prefix = datetime.now().strftime("WO-%Y%m%d-")
+        cur.execute(
+            "SELECT wo_number FROM work_orders WHERE wo_number LIKE %s ORDER BY wo_number DESC LIMIT 1",
+            (prefix + "%",),
+        )
+        row = cur.fetchone()
+        if row:
+            try:
+                seq = int(row["wo_number"].split("-")[-1]) + 1
+            except (ValueError, IndexError):
+                seq = 1
+        else:
+            seq = 1
+        wo_number = f"{prefix}{seq:03d}"
+        cur.execute(
+            """INSERT INTO work_orders (wo_number, equipment, description, checklist_name)
+               VALUES (%s,%s,%s,%s) RETURNING *""",
+            (wo_number, equipment, description, checklist_name),
+        )
+        return cur.fetchone()
+
+
+def get_work_order(wid):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM work_orders WHERE id=%s", (wid,))
+        return cur.fetchone()
+
+
+def update_wo_status(wid, status):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE work_orders SET status=%s, updated_at=NOW() WHERE id=%s",
+            (status, wid),
+        )
+
+
+# ─── PM Sessions ──────────────────────────────────────────────────────────────
+
+def get_active_session_for_wo(wo_id):
+    """Return the in_progress session for a WO, or None."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """SELECT s.*, w.wo_number, w.equipment, p.name AS personnel_name, p.badge
+               FROM pm_sessions s
+               JOIN work_orders w ON w.id = s.wo_id
+               JOIN personnel   p ON p.id = s.personnel_id
+               WHERE s.wo_id = %s AND s.status = 'in_progress'
+               ORDER BY s.started_at DESC LIMIT 1""",
+            (wo_id,),
+        )
+        return cur.fetchone()
+
+
+def create_session(wo_id, personnel_id, template_name):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """INSERT INTO pm_sessions (wo_id, personnel_id, template_name)
+               VALUES (%s,%s,%s) RETURNING *""",
+            (wo_id, personnel_id, template_name),
+        )
+        update_wo_status(wo_id, "in_progress")
+        return cur.fetchone()
+
+
+def get_session(sid):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """SELECT s.*, w.wo_number, w.equipment, p.name AS personnel_name, p.badge
+               FROM pm_sessions s
+               JOIN work_orders w ON w.id = s.wo_id
+               JOIN personnel   p ON p.id = s.personnel_id
+               WHERE s.id=%s""",
+            (sid,),
+        )
+        return cur.fetchone()
+
+
+def complete_session(sid):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "UPDATE pm_sessions SET status='completed', completed_at=NOW() WHERE id=%s RETURNING wo_id",
+            (sid,),
+        )
+        row = cur.fetchone()
+        if row:
+            update_wo_status(row["wo_id"], "completed")
+
+
+def get_recent_sessions(limit=20):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """SELECT s.*, w.wo_number, w.equipment, p.name AS personnel_name
+               FROM pm_sessions s
+               JOIN work_orders w ON w.id = s.wo_id
+               JOIN personnel   p ON p.id = s.personnel_id
+               ORDER BY s.started_at DESC LIMIT %s""",
+            (limit,),
+        )
+        return cur.fetchall()
+
+
+# ─── Checklist Events ─────────────────────────────────────────────────────────
+
+def record_step(session_id, section_index, step_index, step_key, step_type,
+                step_label, value_input=None, photo_path=None):
+    """Insert a checklist event. Returns the inserted row."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """INSERT INTO checklist_events
+               (session_id, section_index, step_index, step_key, step_type,
+                step_label, checked, value_input, photo_path)
+               VALUES (%s,%s,%s,%s,%s,%s,TRUE,%s,%s)
+               ON CONFLICT DO NOTHING
+               RETURNING *""",
+            (session_id, section_index, step_index, step_key, step_type,
+             step_label, value_input, photo_path),
+        )
+        return cur.fetchone()
+
+
+def get_session_events(session_id):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """SELECT * FROM checklist_events
+               WHERE session_id=%s ORDER BY section_index, step_index""",
+            (session_id,),
+        )
+        return cur.fetchall()
+
+
+def get_completed_steps(session_id):
+    """Return set of step_keys already completed for this session."""
+    events = get_session_events(session_id)
+    return {e["step_key"] for e in events}
+
+
+def get_session_events_dict(session_id):
+    """Return dict keyed by step_key -> event row, for progress restoration."""
+    events = get_session_events(session_id)
+    return {e["step_key"]: dict(e) for e in events}
+
+
+def get_resume_section(session_id, sections):
+    """
+    Return the index of the first section that still has incomplete steps.
+    Returns len(sections) if everything is done.
+    """
+    from checklist_parser import get_interactive_steps
+    completed = get_completed_steps(session_id)
+    for section in sections:
+        interactive = get_interactive_steps(section)
+        if not interactive:
+            continue
+        if not all(s["key"] in completed for s in interactive):
+            return section["index"]
+    return len(sections)
