@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Settings — PM Checklist{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Settings</h1>
+</div>
+
+<section class="card">
+  <h2>UI Theme</h2>
+  <p class="field-hint">Select a colour theme. Changes apply instantly — no page reload needed.</p>
+
+  <div class="theme-grid">
+    {% for theme_id, meta in themes.items() %}
+    <button class="theme-swatch {{ 'swatch-active' if theme_id == active_theme }}"
+            data-theme="{{ theme_id }}"
+            onclick="selectTheme('{{ theme_id }}')"
+            title="{{ meta.name }}">
+
+      <div class="swatch-preview" style="background:{{ meta.bg }}">
+        {# Mini nav bar #}
+        <div class="swatch-nav" style="background:{{ meta.bg }};border-bottom:2px solid {{ meta.accent }}">
+          <span style="color:{{ meta.accent }};font-weight:800;font-size:8px">⚙ PM</span>
+          <span style="background:{{ meta.accent }};color:#000;font-size:6px;font-weight:700;
+                       padding:1px 5px;border-radius:3px">+ New</span>
+        </div>
+        {# Mini stat cards #}
+        <div class="swatch-cards">
+          {% for n in ['12','3','9'] %}
+          <div class="swatch-card"
+               style="background:{{ meta.bg }};border:1px solid {{ meta.accent }}22">
+            <div style="color:{{ meta.accent }};font-size:10px;font-weight:800;line-height:1">{{ n }}</div>
+            <div style="color:{{ meta.accent }}88;font-size:5px;margin-top:1px">ITEMS</div>
+          </div>
+          {% endfor %}
+        </div>
+        {# Mini checklist step #}
+        <div class="swatch-step" style="border:1px solid {{ meta.accent }}22">
+          <div class="swatch-check" style="border:2px solid {{ meta.accent }};color:{{ meta.accent }}">✓</div>
+          <div style="flex:1">
+            <div style="height:5px;background:{{ meta.accent }}55;border-radius:2px;margin-bottom:3px;width:70%"></div>
+            <div style="height:4px;background:{{ meta.accent }}22;border-radius:2px;width:45%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="swatch-footer">
+        <div class="swatch-dot" style="background:{{ meta.accent }}"></div>
+        <span class="swatch-name">{{ meta.name }}</span>
+        {% if theme_id == active_theme %}
+        <span class="swatch-active-badge">Active</span>
+        {% endif %}
+      </div>
+    </button>
+    {% endfor %}
+  </div>
+
+  {# Hidden form for non-JS fallback #}
+  <form method="POST" id="theme-form" style="display:none">
+    <input type="hidden" name="theme" id="theme-input" value="{{ active_theme }}">
+  </form>
+</section>
+
+<section class="card">
+  <h2>Application Info</h2>
+  <div class="summary-row">
+    <span>Active Theme</span>
+    <strong id="active-theme-label">{{ themes[active_theme].name if active_theme in themes else active_theme }}</strong>
+  </div>
+  <div class="summary-row">
+    <span>Theme File</span>
+    <code>static/css/themes/{{ active_theme }}.css</code>
+  </div>
+  <div class="summary-row">
+    <span>Version</span>
+    <span>v1.10</span>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function selectTheme(themeId) {
+  // Instant switch via JS
+  window.switchTheme(themeId);
+
+  // Update active-theme-label in info section
+  const names = {
+    {% for tid, meta in themes.items() %}
+    '{{ tid }}': '{{ meta.name }}',
+    {% endfor %}
+  };
+  const label = document.getElementById('active-theme-label');
+  if (label && names[themeId]) label.textContent = names[themeId];
+
+  // Update theme file code display
+  const codeEl = document.querySelector('code[class=""]') ||
+                 [...document.querySelectorAll('code')].find(el => el.textContent.includes('themes/'));
+  if (codeEl) codeEl.textContent = 'static/css/themes/' + themeId + '.css';
+
+  // Show flash-style confirmation
+  showThemeToast(names[themeId] || themeId);
+}
+
+function showThemeToast(name) {
+  let toast = document.getElementById('theme-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'theme-toast';
+    toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);' +
+      'background:var(--success);color:#000;padding:8px 20px;border-radius:20px;' +
+      'font-weight:700;font-size:13px;z-index:999;transition:opacity 0.4s;white-space:nowrap;' +
+      'box-shadow:0 4px 20px rgba(0,0,0,0.4)';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = '✓ Theme: ' + name;
+  toast.style.opacity = '1';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(function() { toast.style.opacity = '0'; }, 2200);
+}
+</script>
+{% endblock %}

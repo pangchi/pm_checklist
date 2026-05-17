@@ -15,6 +15,31 @@
     <div class="summary-row"><span>Steps Recorded</span>{{ events|length }}</div>
   </div>
 
+  {% if corrective_sessions %}
+  <div class="card" style="text-align:left;margin-top:1.25rem">
+    <h2>Corrective Actions Raised</h2>
+    {% for cs in corrective_sessions %}
+    <div class="summary-row">
+      <div>
+        <div style="font-weight:700;font-size:0.9rem">
+          {{ cs.template_name | replace('_',' ') | replace('.txt','') | title }}
+        </div>
+        {% if cs.issue_description %}
+        <div style="font-size:0.78rem;color:var(--text-muted)">{{ cs.issue_description }}</div>
+        {% endif %}
+      </div>
+      <div style="display:flex;align-items:center;gap:0.5rem">
+        <span class="badge badge-{{ cs.status }}">{{ cs.status.replace('_',' ').title() }}</span>
+        <a href="{{ url_for('session_report', session_id=cs.id) }}" class="btn btn-sm btn-outline">Report</a>
+        {% if cs.status == 'in_progress' %}
+        <a href="{{ url_for('checklist_view', session_id=cs.id) }}" class="btn btn-sm btn-primary">Resume</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div class="complete-actions">
     <a href="{{ url_for('session_report', session_id=pm_session.id) }}" class="btn btn-primary">View Full Report</a>
     <a href="{{ url_for('index') }}" class="btn btn-outline">Back to Dashboard</a>

@@ -1,0 +1,19 @@
+/* Theme: Midnight Navy */
+:root {
+  --bg:         #060b18;
+  --surface:    #0d1526;
+  --surface2:   #131e35;
+  --border:     #1e2d4a;
+  --border2:    #2a3f66;
+  --accent:     #7c6af7;
+  --accent-dim: #5b4ce0;
+  --success:    #34d399;
+  --warn:       #fbbf24;
+  --danger:     #f87171;
+  --text:       #e2e8f0;
+  --text-muted: #64748b;
+  --text-dim:   #94a3b8;
+  --radius:     6px;
+  --font-main:  'Syne', sans-serif;
+  --font-mono:  'JetBrains Mono', monospace;
+}

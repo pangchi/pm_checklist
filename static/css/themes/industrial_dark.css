@@ -1,0 +1,19 @@
+/* Theme: Industrial Dark (Default) */
+:root {
+  --bg:         #0f1117;
+  --surface:    #171b24;
+  --surface2:   #1e2330;
+  --border:     #2a3045;
+  --border2:    #3a4460;
+  --accent:     #00c8ff;
+  --accent-dim: #0090b8;
+  --success:    #00e87a;
+  --warn:       #ffb020;
+  --danger:     #ff4040;
+  --text:       #d4daf0;
+  --text-muted: #6a7490;
+  --text-dim:   #8a94b0;
+  --radius:     8px;
+  --font-main:  'Syne', sans-serif;
+  --font-mono:  'JetBrains Mono', monospace;
+}

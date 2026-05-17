@@ -92,13 +92,16 @@ def init_db():
     );
 
     CREATE TABLE IF NOT EXISTS pm_sessions (
-        id            SERIAL PRIMARY KEY,
-        wo_id         INTEGER REFERENCES work_orders(id),
-        personnel_id  INTEGER REFERENCES personnel(id),
-        template_name TEXT NOT NULL,
-        status        TEXT DEFAULT 'in_progress',  -- in_progress, completed
-        started_at    TIMESTAMPTZ DEFAULT NOW(),
-        completed_at  TIMESTAMPTZ
+        id                SERIAL PRIMARY KEY,
+        wo_id             INTEGER REFERENCES work_orders(id),
+        personnel_id      INTEGER REFERENCES personnel(id),
+        template_name     TEXT NOT NULL,
+        session_type      TEXT DEFAULT 'planned',   -- planned, corrective
+        parent_session_id INTEGER REFERENCES pm_sessions(id) ON DELETE SET NULL,
+        issue_description TEXT,                     -- reason corrective was raised
+        status            TEXT DEFAULT 'in_progress',  -- in_progress, completed
+        started_at        TIMESTAMPTZ DEFAULT NOW(),
+        completed_at      TIMESTAMPTZ
     );
 
     CREATE TABLE IF NOT EXISTS checklist_events (
@@ -132,6 +135,12 @@ def init_db():
         UNIQUE (checklist_name, version)
     );
     CREATE INDEX IF NOT EXISTS idx_cv_name ON checklist_versions(checklist_name);
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key         TEXT PRIMARY KEY,
+        value       TEXT NOT NULL,
+        updated_at  TIMESTAMPTZ DEFAULT NOW()
+    );
     """
     with get_conn() as conn:
         cur = conn.cursor()
@@ -154,6 +163,16 @@ def init_db():
                 ALTER TABLE {tbl_col[0]}
                 ALTER COLUMN {tbl_col[1]} TYPE TIMESTAMPTZ
                 USING {tbl_col[1]} AT TIME ZONE 'UTC'
+            """)
+        # Migration: add corrective action columns to pm_sessions
+        for col_def in [
+            ("session_type",      "TEXT DEFAULT 'planned'"),
+            ("parent_session_id", "INTEGER REFERENCES pm_sessions(id) ON DELETE SET NULL"),
+            ("issue_description", "TEXT"),
+        ]:
+            cur.execute(f"""
+                ALTER TABLE pm_sessions
+                ADD COLUMN IF NOT EXISTS {col_def[0]} {col_def[1]}
             """)
         cur.close()
     print("[DB] Tables verified/created. All timestamps stored in UTC (TIMESTAMPTZ).")
@@ -303,15 +322,18 @@ def get_active_session_for_wo(wo_id):
         return cur.fetchone()
 
 
-def create_session(wo_id, personnel_id, template_name):
+def create_session(wo_id, personnel_id, template_name,
+                   session_type="planned", parent_session_id=None, issue_description=None):
     with get_conn() as conn:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
-            """INSERT INTO pm_sessions (wo_id, personnel_id, template_name)
-               VALUES (%s,%s,%s) RETURNING *""",
-            (wo_id, personnel_id, template_name),
+            """INSERT INTO pm_sessions
+               (wo_id, personnel_id, template_name, session_type, parent_session_id, issue_description)
+               VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
+            (wo_id, personnel_id, template_name, session_type, parent_session_id, issue_description),
         )
-        update_wo_status(wo_id, "in_progress")
+        if session_type == "planned":
+            update_wo_status(wo_id, "in_progress")
         return cur.fetchone()
 
 
@@ -319,14 +341,33 @@ def get_session(sid):
     with get_conn() as conn:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
-            """SELECT s.*, w.wo_number, w.equipment, p.name AS personnel_name, p.badge
+            """SELECT s.*, w.wo_number, w.equipment, p.name AS personnel_name, p.badge,
+                      ps_parent.id AS parent_id
                FROM pm_sessions s
                JOIN work_orders w ON w.id = s.wo_id
                JOIN personnel   p ON p.id = s.personnel_id
+               LEFT JOIN pm_sessions ps_parent ON ps_parent.id = s.parent_session_id
                WHERE s.id=%s""",
             (sid,),
         )
         return cur.fetchone()
+
+
+def get_corrective_sessions(parent_session_id: int):
+    """Return all corrective sessions spawned from a given parent session."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """SELECT s.*, w.wo_number, w.equipment, p.name AS personnel_name,
+                      p.badge, s.issue_description
+               FROM pm_sessions s
+               JOIN work_orders w ON w.id = s.wo_id
+               JOIN personnel   p ON p.id = s.personnel_id
+               WHERE s.parent_session_id = %s
+               ORDER BY s.started_at ASC""",
+            (parent_session_id,),
+        )
+        return cur.fetchall()
 
 
 def complete_session(sid):
@@ -349,6 +390,7 @@ def get_recent_sessions(limit=20):
                FROM pm_sessions s
                JOIN work_orders w ON w.id = s.wo_id
                JOIN personnel   p ON p.id = s.personnel_id
+               WHERE s.session_type = 'planned'
                ORDER BY s.started_at DESC LIMIT %s""",
             (limit,),
         )
@@ -568,3 +610,33 @@ def get_available_checklists_from_db():
         result.append({"filename": active_fn, "display": display,
                         "checklist_name": name})
     return result
+
+
+# ─── App Settings ─────────────────────────────────────────────────────────────
+
+def get_setting(key: str, default: str = "") -> str:
+    """Return a setting value by key, or default if not set."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM app_settings WHERE key=%s", (key,))
+        row = cur.fetchone()
+        return row[0] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    """Upsert a setting value."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()
+        """, (key, value))
+
+
+def get_all_settings() -> dict:
+    """Return all settings as a dict."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT key, value FROM app_settings")
+        return {row[0]: row[1] for row in cur.fetchall()}

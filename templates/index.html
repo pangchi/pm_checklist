@@ -38,7 +38,7 @@
         {% for s in sessions %}
         <tr>
           <td><code>{{ s.wo_number }}</code></td>
-          <td>{{ s.equipment }}</td>
+          <td>{{ s.equipment }}{% if s.session_type == "corrective" %} <span class="badge-corrective-sm" title="Corrective Action">⚠</span>{% endif %}</td>
           <td>{{ s.personnel_name }}</td>
           <td>{{ s.started_at | localdt('%Y-%m-%d %H:%M') }}</td>
           <td><span class="badge badge-{{ s.status }}">{{ s.status.replace('_',' ').title() }}</span></td>

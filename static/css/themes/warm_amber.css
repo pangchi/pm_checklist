@@ -1,0 +1,19 @@
+/* Theme: Warm Amber */
+:root {
+  --bg:         #1a1208;
+  --surface:    #241a0a;
+  --surface2:   #2e2010;
+  --border:     #3d2e14;
+  --border2:    #554020;
+  --accent:     #f59e0b;
+  --accent-dim: #d97706;
+  --success:    #84cc16;
+  --warn:       #fb923c;
+  --danger:     #ef4444;
+  --text:       #fef3c7;
+  --text-muted: #78614a;
+  --text-dim:   #a07850;
+  --radius:     4px;
+  --font-main:  'Syne', sans-serif;
+  --font-mono:  'JetBrains Mono', monospace;
+}

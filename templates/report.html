@@ -67,6 +67,46 @@
   </section>
 {% endfor %}
 
+{% if corrective_sessions %}
+<section class="card">
+  <h3 style="color:var(--warn);margin-bottom:0.875rem">⚠ Corrective Actions Raised</h3>
+  <table class="data-table">
+    <thead>
+      <tr><th>Checklist</th><th>Issue</th><th>Technician</th><th>Started</th><th>Status</th><th>Report</th></tr>
+    </thead>
+    <tbody>
+      {% for cs in corrective_sessions %}
+      <tr>
+        <td>{{ cs.template_name | replace('_',' ') | replace('.txt','') | title }}</td>
+        <td style="max-width:200px;color:var(--text-dim);font-size:0.82rem">{{ cs.issue_description or '—' }}</td>
+        <td>{{ cs.personnel_name }}</td>
+        <td>{{ cs.started_at | localdt('%Y-%m-%d %H:%M') }}</td>
+        <td><span class="badge badge-{{ cs.status }}">{{ cs.status.replace('_',' ').title() }}</span></td>
+        <td><a href="{{ url_for('session_report', session_id=cs.id) }}" class="btn btn-sm btn-outline">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if pm_session.session_type == 'corrective' %}
+<section class="card" style="border-color:var(--warn)">
+  <h3 style="color:var(--warn);margin-bottom:0.5rem">⚠ Corrective Action Report</h3>
+  <div class="summary-row">
+    <span>Issue</span><strong>{{ pm_session.issue_description or '—' }}</strong>
+  </div>
+  {% if pm_session.parent_id %}
+  <div class="summary-row">
+    <span>Parent Session</span>
+    <a href="{{ url_for('session_report', session_id=pm_session.parent_id) }}" class="btn btn-sm btn-outline">
+      View Parent Report
+    </a>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
 <div class="report-footer">
   <a href="{{ url_for('index') }}" class="btn btn-outline">← Dashboard</a>
 </div>

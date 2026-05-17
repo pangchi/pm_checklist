@@ -1,0 +1,19 @@
+/* Theme: Crimson Steel */
+:root {
+  --bg:         #0e0a0a;
+  --surface:    #1a1010;
+  --surface2:   #221515;
+  --border:     #3a1e1e;
+  --border2:    #4f2828;
+  --accent:     #ef4444;
+  --accent-dim: #dc2626;
+  --success:    #22d3ee;
+  --warn:       #fb923c;
+  --danger:     #f97316;
+  --text:       #fef2f2;
+  --text-muted: #7f4f4f;
+  --text-dim:   #b08080;
+  --radius:     6px;
+  --font-main:  'Syne', sans-serif;
+  --font-mono:  'JetBrains Mono', monospace;
+}

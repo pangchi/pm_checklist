@@ -1,0 +1,86 @@
+# Corrective Action Checklist
+# Use this checklist when an out-of-control situation or defect is discovered
+# during a planned PM or routine inspection.
+# Est. Duration: 30 minutes – 4 hours (depending on severity)
+#
+# Format:
+#   SECTION: <Title>       → section header
+#   STEP: <Description>    → checkbox only
+#   STEP_VALUE: <Desc>     → checkbox + required value input
+#   PHOTO: <Description>   → checkbox + required photo upload
+#   NOTE: <Text>           → read-only informational note
+
+SECTION: Immediate Response & Containment
+
+NOTE: Stop all affected operations immediately. Notify shift supervisor before proceeding.
+STEP: Shift supervisor notified of out-of-control situation
+STEP: Affected equipment / process isolated or shut down safely
+STEP: Lock Out / Tag Out (LOTO) applied where required
+STEP: Area cordoned off — warning signs and barrier tape placed
+STEP: No further product processed or released until situation assessed
+PHOTO: Photograph defect or out-of-control condition as found
+
+SECTION: Situation Assessment
+
+NOTE: Record all findings accurately. Do not disturb evidence before photographing.
+STEP_VALUE: Describe defect or failure mode in detail
+STEP_VALUE: Record time defect was first observed
+STEP_VALUE: Estimated duration defect may have been present (hours)
+STEP_VALUE: Number of units / batches potentially affected
+STEP: Affected units / batches identified and placed on hold
+PHOTO: Photograph measurement, gauge, or instrument reading at time of discovery
+STEP_VALUE: Record severity classification (Critical / Major / Minor)
+STEP: Quality assurance or engineering notified
+
+SECTION: Root Cause Investigation
+
+NOTE: Identify the root cause before implementing a fix. Use 5-Why or fishbone analysis if needed.
+STEP_VALUE: State the apparent root cause
+STEP_VALUE: Describe contributing factors (if any)
+STEP: Physical evidence collected and preserved (samples, broken parts, etc.)
+PHOTO: Photograph disassembled or exposed components showing root cause
+STEP_VALUE: Record name of person performing root cause analysis
+STEP: Root cause confirmed — not just a symptom
+
+SECTION: Corrective Repair
+
+NOTE: Use only approved spare parts and materials. Do not bypass safety devices.
+STEP: Required spare parts and materials confirmed available
+STEP_VALUE: List parts replaced or repaired (part numbers and quantities)
+STEP: Repair carried out per approved procedure or OEM specification
+STEP_VALUE: Record torque or setting values applied during repair (if applicable)
+PHOTO: Photograph repair or replacement completed before reassembly
+STEP: All tools and foreign objects removed from work area
+STEP: Guards, covers, and safety devices reinstated
+STEP: LOTO removed — equipment cleared for testing
+
+SECTION: Verification & Testing
+
+NOTE: Do not return equipment to service without completing all verification steps.
+STEP: Equipment powered on — no abnormal alarms or indications
+STEP: Run equipment through one full operating cycle under observation
+STEP_VALUE: Record key parameter readings after repair (e.g. current, pressure, temperature)
+STEP: Original defect or failure mode confirmed resolved
+STEP: No new defects or abnormalities observed during test run
+PHOTO: Photograph equipment operating normally after repair
+
+SECTION: Affected Product / Output Disposition
+
+NOTE: Complete this section only if product or output may have been affected.
+STEP: Affected units / batches reviewed for conformance
+STEP_VALUE: Number of units / batches confirmed non-conforming
+STEP_VALUE: Disposition decision (Rework / Scrap / Use-as-is with approval / Return to stock)
+STEP: Disposition decision approved by quality assurance
+STEP: Non-conforming units / batches segregated and labelled
+
+SECTION: Preventive Measures & Documentation
+
+NOTE: Preventing recurrence is as important as fixing the immediate issue.
+STEP_VALUE: Describe immediate preventive measure implemented
+STEP_VALUE: Describe long-term preventive measure or improvement recommended
+STEP: PM schedule reviewed — frequency adjustment recommended if needed
+STEP: Maintenance procedure or work instruction updated if required
+STEP: Findings entered into maintenance management system (CMMS / ERP)
+STEP_VALUE: Record total corrective action duration (minutes)
+STEP: Corrective action report reviewed and signed off by supervisor
+PHOTO: Photograph final condition — equipment returned to service

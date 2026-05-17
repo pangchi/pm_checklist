@@ -89,3 +89,28 @@ def send_startup_alert(bot_token: str, chat_id: str, app_port: int = 5000):
     except Exception as e:
         logger.warning(f"[Telegram] Unexpected error: {e}")
         return False
+
+
+def send_telegram_message(bot_token: str, chat_id: str, html_text: str) -> bool:
+    """Send any HTML-formatted message via Telegram. Returns True on success."""
+    if not bot_token or not chat_id:
+        return False
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = json.dumps({
+        "chat_id": chat_id,
+        "text": html_text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }).encode()
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read())
+            return bool(body.get("ok"))
+    except Exception as e:
+        logger.warning(f"[Telegram] send_telegram_message failed: {e}")
+        return False

@@ -1,0 +1,19 @@
+/* Theme: Arctic White */
+:root {
+  --bg:         #f8fafc;
+  --surface:    #ffffff;
+  --surface2:   #f1f5f9;
+  --border:     #e2e8f0;
+  --border2:    #cbd5e1;
+  --accent:     #0ea5e9;
+  --accent-dim: #0284c7;
+  --success:    #10b981;
+  --warn:       #f59e0b;
+  --danger:     #ef4444;
+  --text:       #0f172a;
+  --text-muted: #94a3b8;
+  --text-dim:   #475569;
+  --radius:     12px;
+  --font-main:  'Syne', sans-serif;
+  --font-mono:  'JetBrains Mono', monospace;
+}

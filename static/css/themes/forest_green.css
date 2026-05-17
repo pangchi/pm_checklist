@@ -1,0 +1,19 @@
+/* Theme: Forest Green */
+:root {
+  --bg:         #0c1a0e;
+  --surface:    #132116;
+  --surface2:   #192b1c;
+  --border:     #1e3d23;
+  --border2:    #2a5530;
+  --accent:     #4ade80;
+  --accent-dim: #22c55e;
+  --success:    #86efac;
+  --warn:       #fde047;
+  --danger:     #f87171;
+  --text:       #dcfce7;
+  --text-muted: #4b7a56;
+  --text-dim:   #6ea875;
+  --radius:     10px;
+  --font-main:  'Syne', sans-serif;
+  --font-mono:  'JetBrains Mono', monospace;
+}

@@ -1,0 +1,19 @@
+/* Theme: Pastel Studio */
+:root {
+  --bg:         #1e1a2e;
+  --surface:    #28243d;
+  --surface2:   #322d4a;
+  --border:     #3d3758;
+  --border2:    #524b70;
+  --accent:     #c084fc;
+  --accent-dim: #a855f7;
+  --success:    #86efac;
+  --warn:       #fde68a;
+  --danger:     #fca5a5;
+  --text:       #f3e8ff;
+  --text-muted: #7c6f9a;
+  --text-dim:   #a89fc0;
+  --radius:     16px;
+  --font-main:  'Syne', sans-serif;
+  --font-mono:  'JetBrains Mono', monospace;
+}

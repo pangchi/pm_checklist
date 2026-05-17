@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Storage Status{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Storage Status</h1>
+</div>
+
+{% set pct = disk.pct %}
+{% set over = pct >= threshold %}
+
+<div class="stats-row" style="margin-bottom:1.25rem">
+  <div class="stat-card">
+    <div class="stat-num" style="color:{% if over %}var(--danger){% elif pct > threshold - 10 %}var(--warn){% else %}var(--success){% endif %}">
+      {{ disk.pct }}%
+    </div>
+    <div class="stat-label">Disk Used</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ disk.free_gb }}</div>
+    <div class="stat-label">GB Free</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ disk.total_gb }}</div>
+    <div class="stat-label">GB Total</div>
+  </div>
+</div>
+
+{% if over %}
+<div class="alert" style="background:rgba(255,64,64,0.1);border:1px solid var(--danger);color:var(--danger);margin-bottom:1.25rem">
+  ⚠ Disk usage is above the {{ threshold|int }}% threshold. Auto-purge will trigger on next photo upload.
+</div>
+{% elif disk.pct > threshold - 10 %}
+<div class="alert alert-warn" style="margin-bottom:1.25rem">
+  ⚡ Disk usage is approaching the {{ threshold|int }}% threshold.
+</div>
+{% endif %}
+
+<div class="two-col">
+  <section class="card">
+    <h2>Disk Partition</h2>
+    <div style="margin-bottom:0.75rem">
+      <div style="display:flex;justify-content:space-between;font-size:0.82rem;color:var(--text-muted);margin-bottom:0.35rem">
+        <span>{{ disk.used_gb }} GB used</span>
+        <span>{{ disk.free_gb }} GB free</span>
+      </div>
+      <div style="height:10px;background:var(--surface2);border-radius:5px;overflow:hidden">
+        <div style="height:100%;width:{{ disk.pct }}%;border-radius:5px;
+             background:{% if over %}var(--danger){% elif disk.pct > threshold - 10 %}var(--warn){% else %}var(--accent){% endif %};
+             transition:width 0.5s ease"></div>
+      </div>
+      <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.35rem">
+        Partition: <code>{{ partition }}</code> <span class="checklist-tag">auto-detected</span> — Threshold: <strong>{{ threshold|int }}%</strong>
+      </div>
+    </div>
+
+    <div class="summary-row">
+      <span>Total Disk</span><strong>{{ disk.total_gb }} GB</strong>
+    </div>
+    <div class="summary-row">
+      <span>Used</span><strong>{{ disk.used_gb }} GB ({{ disk.pct }}%)</strong>
+    </div>
+    <div class="summary-row">
+      <span>Free</span><strong>{{ disk.free_gb }} GB</strong>
+    </div>
+    <div class="summary-row">
+      <span>Purge Threshold</span><strong>{{ threshold|int }}%</strong>
+    </div>
+    <div class="summary-row">
+      <span>Purge Target</span><strong>{{ (threshold - 5)|int }}% (threshold − 5%)</strong>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Photo Storage</h2>
+    <div class="summary-row">
+      <span>Files on Disk</span><strong>{{ photo_count }} file(s)</strong>
+    </div>
+    <div class="summary-row">
+      <span>Total Photo Size</span><strong>{{ photo_size_human }}</strong>
+    </div>
+    <div class="summary-row">
+      <span>Photos in DB</span><strong>{{ db_photo_count }} record(s)</strong>
+    </div>
+    <div class="summary-row">
+      <span>Upload Folder</span>
+      <code style="font-size:0.75rem">static/uploads/</code>
+    </div>
+
+    <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.75rem">
+        Manual purge deletes the oldest photos regardless of current disk usage.
+        DB records are updated (photo_path set to NULL).
+      </p>
+      <form method="POST" action="{{ url_for('storage_purge_manual') }}"
+            onsubmit="return confirm('Delete oldest photos now? This cannot be undone.')">
+        <button type="submit" class="btn btn-outline"
+                style="border-color:var(--danger);color:var(--danger)">
+          🗑 Manual Purge Oldest Photos
+        </button>
+      </form>
+    </div>
+  </section>
+</div>
+
+<section class="card">
+  <h2>How Auto-Purge Works</h2>
+  <div style="font-size:0.88rem;color:var(--text-dim);display:flex;flex-direction:column;gap:0.6rem;line-height:1.6">
+    <p>After every photo upload and on server startup, disk usage on <code>{{ partition }}</code> is checked.</p>
+    <p>If usage is <strong>≥ {{ threshold|int }}%</strong>, the oldest photos (by DB timestamp) are deleted from disk and their
+       <code>photo_path</code> field is set to <code>NULL</code> in the database.
+       Purging continues until disk usage falls below <strong>{{ (threshold - 5)|int }}%</strong> or no photos remain.</p>
+    <p>A Telegram alert is sent each time a purge occurs, listing the deleted files, bytes freed, and new disk usage.</p>
+    <p>Configure the threshold and monitored partition in <code>config.ini</code> under <code>[storage]</code>.</p>
+  </div>
+</section>
+{% endblock %}

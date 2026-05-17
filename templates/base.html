@@ -10,8 +10,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" id="theme-css" href="{{ url_for('static', filename=theme_css) }}">
 </head>
-<body>
+<body data-theme="{{ active_theme }}" class="{{ 'theme-light' if not (theme_meta and theme_meta.dark) else 'theme-dark' }}">
   <nav class="topnav">
     <a href="{{ url_for('index') }}" class="nav-brand">⚙ PM<span>Checklist</span></a>
     <div class="nav-links">
@@ -19,6 +20,8 @@
       <a href="{{ url_for('wo_list') }}">Work Orders</a>
       <a href="{{ url_for('personnel_list') }}">Personnel</a>
       <a href="{{ url_for('checklist_list') }}">Templates</a>
+      <a href="{{ url_for('storage_status') }}">Storage</a>
+      <a href="{{ url_for('settings') }}">⚙ Settings</a>
     </div>
     <button class="nav-hamburger" id="hamburger" aria-label="Menu" aria-expanded="false">
       <span></span><span></span><span></span>
@@ -31,6 +34,8 @@
     <a href="{{ url_for('wo_list') }}">📋 Work Orders</a>
     <a href="{{ url_for('personnel_list') }}">👷 Personnel</a>
     <a href="{{ url_for('checklist_list') }}">📄 Templates</a>
+    <a href="{{ url_for('storage_status') }}">💾 Storage</a>
+    <a href="{{ url_for('settings') }}">⚙ Settings</a>
   </div>
 
   <div class="flash-container">
@@ -101,6 +106,24 @@
       return d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
     }
     return d.toLocaleString(undefined, {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+  };
+  </script>
+  <script>
+  // ── Instant theme switch (no reload) ───────────────────────
+  window.switchTheme = function(themeId) {
+    fetch('/settings/theme/' + themeId, {method:'POST'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.ok) {
+          document.getElementById('theme-css').href =
+            '/static/css/themes/' + themeId + '.css';
+          document.body.setAttribute('data-theme', themeId);
+          // Update active state on all swatches
+          document.querySelectorAll('.theme-swatch').forEach(function(el){
+            el.classList.toggle('swatch-active', el.dataset.theme === themeId);
+          });
+        }
+      });
   };
   </script>
   {% block scripts %}{% endblock %}

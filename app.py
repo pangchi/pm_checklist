@@ -13,7 +13,8 @@ from werkzeug.utils import secure_filename
 
 import db
 from checklist_parser import parse_template, get_interactive_steps, parse_template_from_string, validate_template
-from telegram_alert import send_startup_alert
+from telegram_alert import send_startup_alert, send_telegram_message
+from storage_manager import purge_if_needed, get_disk_usage_info, get_app_partition
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,30 @@ def format_dt(value, fmt="%Y-%m-%d %H:%M:%S"):
 
 app.jinja_env.filters["localdt"] = format_dt
 
+
+@app.context_processor
+def inject_theme():
+    """Make active theme available in all templates.
+    Fully defensive — never raises, always returns valid values."""
+    _fallback = "industrial_dark"
+    try:
+        active = db.get_setting("theme", DEFAULT_THEME)
+    except Exception:
+        active = _fallback
+
+    # Ensure active is actually in THEMES dict
+    if not active or active not in THEMES:
+        active = DEFAULT_THEME if DEFAULT_THEME in THEMES else _fallback
+
+    # Final safety: if THEMES is somehow empty, return bare defaults
+    meta = THEMES.get(active) or {"name": "Default", "dark": True,
+                                   "accent": "#00c8ff", "bg": "#0f1117"}
+    return {
+        "active_theme": active,
+        "theme_meta":   meta,
+        "theme_css":    f"css/themes/{active}.css",
+    }
+
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), config["app"]["upload_folder"])
 MAX_MB = int(config["app"].get("max_upload_mb", 16))
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
@@ -61,6 +86,20 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_MB * 1024 * 1024
 ALLOWED_EXT = {"png", "jpg", "jpeg", "gif", "bmp", "webp", "pdf"}
 
 CHECKLIST_DIR = os.path.join(os.path.dirname(__file__), config["checklist"]["template_dir"])
+THEMES_DIR    = os.path.join(os.path.dirname(__file__), "static", "css", "themes")
+
+# Theme metadata: filename stem → display info
+THEMES = {
+    "industrial_dark": {"name": "Industrial Dark", "accent": "#00c8ff", "bg": "#0f1117", "dark": True},
+    "clean_light":     {"name": "Clean Light",     "accent": "#2563eb", "bg": "#f4f5f7", "dark": False},
+    "midnight_navy":   {"name": "Midnight Navy",   "accent": "#7c6af7", "bg": "#060b18", "dark": True},
+    "forest_green":    {"name": "Forest Green",    "accent": "#4ade80", "bg": "#0c1a0e", "dark": True},
+    "warm_amber":      {"name": "Warm Amber",      "accent": "#f59e0b", "bg": "#1a1208", "dark": True},
+    "arctic_white":    {"name": "Arctic White",    "accent": "#0ea5e9", "bg": "#f8fafc", "dark": False},
+    "crimson_steel":   {"name": "Crimson Steel",   "accent": "#ef4444", "bg": "#0e0a0a", "dark": True},
+    "pastel_studio":   {"name": "Pastel Studio",   "accent": "#c084fc", "bg": "#1e1a2e", "dark": True},
+}
+DEFAULT_THEME = config["app"].get("theme", "industrial_dark")
 
 
 def _seed_checklists():
@@ -108,6 +147,71 @@ def load_checklist_by_name(template_name):
 
 db.load_config(CONFIG_PATH)
 db.init_db()
+
+
+# ─── Storage management ───────────────────────────────────────────────────────
+
+def _storage_dsn() -> dict:
+    """Return psycopg2 DSN dict from config."""
+    sec = config["database"]
+    return {
+        "host":     sec["host"],
+        "port":     int(sec["port"]),
+        "dbname":   sec["name"],
+        "user":     sec["user"],
+        "password": sec["password"],
+    }
+
+
+def _run_storage_check():
+    """Check disk usage and purge oldest photos if over threshold. Sends Telegram alert."""
+    stor = config["storage"] if "storage" in config else {}
+    threshold = float(stor.get("disk_threshold_pct", 80))
+    partition  = APP_PARTITION
+
+    summary = purge_if_needed(
+        upload_folder=UPLOAD_FOLDER,
+        dsn=_storage_dsn(),
+        threshold_pct=threshold,
+        partition=partition,
+    )
+
+    if summary is None:
+        return   # Under threshold — nothing to report
+
+    # Build Telegram alert
+    tg = config["telegram"] if "telegram" in config else {}
+    bot_token = tg.get("bot_token", "").strip()
+    chat_id   = tg.get("chat_id",   "").strip()
+
+    if bot_token and chat_id:
+        status_icon = "⚠" if summary["error"] else "🗑"
+        lines = [
+            f"{status_icon} <b>PM Checklist — Auto Photo Purge</b>",
+            "",
+            f"📊 Disk was at <b>{summary['triggered_at_pct']}%</b> (threshold {threshold:.0f}%)",
+            f"✅ Disk now at <b>{summary['final_pct']}%</b>",
+            f"🗑 Deleted <b>{summary['deleted_count']}</b> photo(s) — freed <b>{summary['freed_human']}</b>",
+            f"📷 Remaining photos in DB: {summary['remaining_photos']}",
+        ]
+        if summary["deleted"]:
+            lines.append("")
+            lines.append("<b>Deleted files:</b>")
+            for d in summary["deleted"][:10]:   # cap at 10 to avoid huge messages
+                lines.append(
+                    f"  • {d['wo_number']} / {d['equipment']} — "
+                    f"<code>{d['photo_path']}</code>"
+                )
+            if len(summary["deleted"]) > 10:
+                lines.append(f"  … and {len(summary['deleted']) - 10} more")
+        if summary["error"]:
+            lines += ["", f"❌ Error: <code>{summary['error']}</code>"]
+
+        send_telegram_message(bot_token, chat_id, "\n".join(lines))
+
+# Detect the partition where this app resides — used for all disk checks
+APP_PARTITION = get_app_partition(os.path.abspath(__file__))
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -254,6 +358,8 @@ def checklist_view(session_id):
             next_step_key = s["key"]
             break
 
+    corrective_sessions = db.get_corrective_sessions(session_id)
+
     return render_template(
         "checklist.html",
         pm_session=pm_session,
@@ -266,6 +372,9 @@ def checklist_view(session_id):
         section_done=section_done,
         interactive_steps=interactive_steps,
         next_step_key=next_step_key,
+        corrective_sessions=corrective_sessions,
+        available_checklists=get_available_checklists(),
+        all_personnel=db.get_all_personnel(),
     )
 
 
@@ -359,6 +468,10 @@ def upload_photo(session_id):
         file.save(filepath)
         # Return web-accessible relative path
         rel_path = f"session_{session_id}/{filename}"
+
+        # Check disk usage and purge oldest photos if threshold exceeded
+        _run_storage_check()
+
         return jsonify({"success": True, "photo_path": rel_path, "filename": filename})
 
     return jsonify({"success": False, "error": "File type not allowed"}), 400
@@ -377,11 +490,13 @@ def session_complete(session_id):
         pm_session = db.get_session(session_id)
     events = db.get_session_events(session_id)
     sections = load_checklist_by_name(pm_session["template_name"])
+    corrective_sessions = db.get_corrective_sessions(session_id)
     return render_template(
         "complete.html",
         pm_session=pm_session,
         events=events,
         sections=sections,
+        corrective_sessions=corrective_sessions,
     )
 
 
@@ -390,12 +505,75 @@ def session_report(session_id):
     pm_session = db.get_session(session_id)
     events = db.get_session_events(session_id)
     sections = load_checklist_by_name(pm_session["template_name"])
+    corrective_sessions = db.get_corrective_sessions(session_id)
     return render_template(
         "report.html",
         pm_session=pm_session,
         events=events,
         sections=sections,
+        corrective_sessions=corrective_sessions,
     )
+
+
+# ─── Storage Status ──────────────────────────────────────────────────────────
+
+@app.route("/admin/storage")
+def storage_status():
+    stor = config["storage"] if "storage" in config else {}
+    threshold = float(stor.get("disk_threshold_pct", 80))
+    disk = get_disk_usage_info(APP_PARTITION)
+
+    # Count photos and total size on disk
+    photo_count = 0
+    photo_size  = 0
+    for root, dirs, files in os.walk(UPLOAD_FOLDER):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            try:
+                sz = os.path.getsize(fpath)
+                photo_size  += sz
+                photo_count += 1
+            except OSError:
+                pass
+
+    # DB photo count
+    import psycopg2
+    conn = psycopg2.connect(**_storage_dsn())
+    cur  = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM checklist_events WHERE photo_path IS NOT NULL")
+    db_photo_count = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "storage_status.html",
+        disk=disk,
+        threshold=threshold,
+        partition=APP_PARTITION,
+        photo_count=photo_count,
+        photo_size_human=f"{photo_size/1e6:.1f} MB" if photo_size < 1e9 else f"{photo_size/1e9:.2f} GB",
+        db_photo_count=db_photo_count,
+    )
+
+
+@app.route("/admin/storage/purge", methods=["POST"])
+def storage_purge_manual():
+    """Manually trigger a purge run regardless of current disk usage."""
+    stor = config["storage"] if "storage" in config else {}
+    partition = APP_PARTITION
+    # Force purge by temporarily setting threshold to 0
+    from storage_manager import get_disk_usage_pct
+    summary = purge_if_needed(
+        upload_folder=UPLOAD_FOLDER,
+        dsn=_storage_dsn(),
+        threshold_pct=0.0,   # always trigger
+        partition=partition,
+    )
+    if summary and summary["deleted_count"] > 0:
+        flash(f"Purged {summary['deleted_count']} photo(s), freed {summary['freed_human']}.", "success")
+    else:
+        flash("No photos to purge or purge had no effect.", "error")
+    return redirect(url_for("storage_status"))
 
 
 # ─── Checklist Version Management ────────────────────────────────────────────
@@ -575,6 +753,82 @@ def checklist_compare():
                            diff_lines=diff_lines)
 
 
+# ─── Corrective Actions ───────────────────────────────────────────────────────
+
+@app.route("/session/<int:session_id>/corrective/start", methods=["POST"])
+def corrective_start(session_id):
+    """Start a corrective action session linked to a parent session."""
+    parent = db.get_session(session_id)
+    if not parent:
+        return jsonify({"success": False, "error": "Parent session not found."}), 404
+
+    checklist_name  = request.form.get("checklist_name", "").strip()
+    issue_desc      = request.form.get("issue_description", "").strip()
+    personnel_id    = request.form.get("personnel_id", parent["id"]).strip()
+
+    if not checklist_name:
+        flash("Please select a checklist for the corrective action.", "error")
+        return redirect(url_for("checklist_view", session_id=session_id))
+
+    if not issue_desc:
+        flash("Please describe the issue that triggered this corrective action.", "error")
+        return redirect(url_for("checklist_view", session_id=session_id))
+
+    # Use parent's personnel if not specified
+    if not personnel_id or not personnel_id.isdigit():
+        personnel_id = parent["personnel_id"]
+
+    corrective = db.create_session(
+        wo_id=parent["wo_id"],
+        personnel_id=int(personnel_id),
+        template_name=checklist_name,
+        session_type="corrective",
+        parent_session_id=session_id,
+        issue_description=issue_desc,
+    )
+    flash(f"Corrective action session started. Complete it and return to the main checklist.", "success")
+    return redirect(url_for("checklist_view", session_id=corrective["id"]))
+
+
+@app.route("/session/<int:session_id>/corrective/modal")
+def corrective_modal_data(session_id):
+    """AJAX: return data needed to populate the corrective action modal."""
+    checklists = get_available_checklists()
+    people     = db.get_all_personnel()
+    session    = db.get_session(session_id)
+    return jsonify({
+        "checklists": [{"name": c["checklist_name"], "display": c["display"]} for c in checklists],
+        "personnel":  [{"id": p["id"], "name": p["name"], "badge": p["badge"]} for p in people],
+        "current_personnel_id": session["personnel_id"] if session else None,
+    })
+
+
+# ─── Settings ─────────────────────────────────────────────────────────────────
+
+@app.route("/settings", methods=["GET", "POST"])
+def settings():
+    if request.method == "POST":
+        theme = request.form.get("theme", DEFAULT_THEME).strip()
+        if theme in THEMES:
+            db.set_setting("theme", theme)
+            flash(f"Theme changed to '{THEMES[theme]['name']}'.", "success")
+        else:
+            flash("Invalid theme selection.", "error")
+        return redirect(url_for("settings"))
+
+    active = db.get_setting("theme", DEFAULT_THEME)
+    return render_template("settings.html", themes=THEMES, active_theme=active)
+
+
+@app.route("/settings/theme/<theme_id>", methods=["POST"])
+def set_theme(theme_id):
+    """Quick-set theme via AJAX."""
+    if theme_id not in THEMES:
+        return jsonify({"ok": False, "error": "Unknown theme"}), 400
+    db.set_setting("theme", theme_id)
+    return jsonify({"ok": True, "theme": theme_id})
+
+
 # ─── API: browser timezone registration ──────────────────────────────────────
 
 @app.route("/api/tz", methods=["POST"])
@@ -593,6 +847,7 @@ if __name__ == "__main__":
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     port = int(config["app"].get("port", 5000))
     _seed_checklists()  # Seed any disk .txt files into DB versions table
+    _run_storage_check()  # Purge old photos if disk already over threshold
 
     # Send Telegram startup alert
     tg = config["telegram"] if "telegram" in config else {}
