@@ -12,7 +12,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 import db
-from checklist_parser import parse_template, get_interactive_steps
+from checklist_parser import parse_template, get_interactive_steps, parse_template_from_string, validate_template
 from telegram_alert import send_startup_alert
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -63,24 +63,41 @@ ALLOWED_EXT = {"png", "jpg", "jpeg", "gif", "bmp", "webp", "pdf"}
 CHECKLIST_DIR = os.path.join(os.path.dirname(__file__), config["checklist"]["template_dir"])
 
 
-def get_available_checklists():
-    """Scan CHECKLIST_DIR for .txt files and return list of (filename, display_name)."""
-    checklists = []
+def _seed_checklists():
+    """Seed all .txt files from CHECKLIST_DIR into the DB on startup."""
     if not os.path.isdir(CHECKLIST_DIR):
-        return checklists
+        return
     for fname in sorted(os.listdir(CHECKLIST_DIR)):
-        if fname.lower().endswith(".txt") and not fname.startswith("#"):
-            # Convert filename to display name: "quarterly_pm.txt" -> "Quarterly PM"
-            display = os.path.splitext(fname)[0].replace("_", " ").title()
-            checklists.append({"filename": fname, "display": display})
+        if fname.lower().endswith(".txt") and not fname.startswith(("#", ".")):
+            db.seed_checklist_from_file(os.path.join(CHECKLIST_DIR, fname))
+
+
+def get_available_checklists():
+    """Return active checklist versions from DB."""
+    rows = db.get_available_checklists_from_db()
+    if rows:
+        return rows
+    # Fallback: scan disk (e.g. before first seed)
+    checklists = []
+    if os.path.isdir(CHECKLIST_DIR):
+        for fname in sorted(os.listdir(CHECKLIST_DIR)):
+            if fname.lower().endswith(".txt") and not fname.startswith("#"):
+                display = os.path.splitext(fname)[0].replace("_", " ").title()
+                checklists.append({"filename": fname, "display": display,
+                                   "checklist_name": os.path.splitext(fname)[0]})
     return checklists
 
 
 def load_checklist_by_name(template_name):
-    """Load and parse a checklist by filename."""
+    """Load and parse the active version of a checklist from DB."""
+    # template_name may be "weekly_pm.txt" or "weekly_pm"
+    name = os.path.splitext(template_name)[0]
+    row = db.get_active_version(name)
+    if row:
+        return parse_template_from_string(row["content"])
+    # Fallback to disk
     path = os.path.join(CHECKLIST_DIR, template_name)
     if not os.path.isfile(path):
-        # Fallback: first available checklist
         files = [f for f in os.listdir(CHECKLIST_DIR) if f.endswith(".txt")]
         if not files:
             return []
@@ -230,6 +247,13 @@ def checklist_view(session_id):
 
     section_done = all(s["key"] in completed_keys for s in interactive_steps)
 
+    # First incomplete interactive step — all steps after it are locked
+    next_step_key = None
+    for s in interactive_steps:
+        if s["key"] not in completed_keys:
+            next_step_key = s["key"]
+            break
+
     return render_template(
         "checklist.html",
         pm_session=pm_session,
@@ -241,6 +265,7 @@ def checklist_view(session_id):
         events_dict=events_dict,
         section_done=section_done,
         interactive_steps=interactive_steps,
+        next_step_key=next_step_key,
     )
 
 
@@ -256,6 +281,25 @@ def step_check(session_id):
     step_label = data.get("step_label")
     value_input = data.get("value_input") or None
     photo_path = data.get("photo_path") or None
+
+    # Enforce sequential order — reject if a previous step is still incomplete
+    from checklist_parser import get_interactive_steps as _gis
+    _sections = load_checklist_by_name(
+        db.get_session(session_id)["template_name"]
+    )
+    _completed = db.get_completed_steps(session_id)
+    for _sec in _sections:
+        for _st in _gis(_sec):
+            if _st["key"] == step_key:
+                break  # reached the step being submitted — all prior done
+            if _st["key"] not in _completed:
+                return jsonify({
+                    "success": False,
+                    "error": "Steps must be completed in order. Please complete the previous step first."
+                }), 400
+        else:
+            continue
+        break
 
     # Validate required value
     if step_type == "STEP_VALUE" and not value_input:
@@ -354,6 +398,183 @@ def session_report(session_id):
     )
 
 
+# ─── Checklist Version Management ────────────────────────────────────────────
+
+@app.route("/checklists")
+def checklist_list():
+    names = db.get_all_checklist_names()
+    return render_template("checklists.html", names=names)
+
+
+@app.route("/checklists/<checklist_name>")
+def checklist_detail(checklist_name):
+    versions = db.get_checklist_versions(checklist_name)
+    if not versions:
+        flash(f"No versions found for '{checklist_name}'.", "error")
+        return redirect(url_for("checklist_list"))
+    active = next((v for v in versions if v["is_active"]), None)
+    return render_template("checklist_versions.html",
+                           checklist_name=checklist_name,
+                           versions=versions,
+                           active=active)
+
+
+@app.route("/checklists/<checklist_name>/upload", methods=["POST"])
+def checklist_upload(checklist_name):
+    if "file" not in request.files:
+        flash("No file selected.", "error")
+        return redirect(url_for("checklist_detail", checklist_name=checklist_name))
+
+    f = request.files["file"]
+    notes = request.form.get("notes", "").strip()
+    uploader = request.form.get("uploader", "").strip()
+
+    if not f.filename or not f.filename.lower().endswith(".txt"):
+        flash("Only .txt files are accepted.", "error")
+        return redirect(url_for("checklist_detail", checklist_name=checklist_name))
+
+    content_bytes = f.read()
+    try:
+        text = content_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        flash("File must be UTF-8 encoded.", "error")
+        return redirect(url_for("checklist_detail", checklist_name=checklist_name))
+
+    errors = validate_template(text)
+    if errors:
+        flash("Validation failed: " + " | ".join(errors[:5]), "error")
+        return redirect(url_for("checklist_detail", checklist_name=checklist_name))
+
+    row, err = db.upload_checklist_version(
+        checklist_name, f.filename, text, notes, uploader
+    )
+    if err:
+        flash(err, "error")
+    else:
+        flash(f"Version {row['version']} uploaded successfully.", "success")
+    return redirect(url_for("checklist_detail", checklist_name=checklist_name))
+
+
+@app.route("/checklists/new", methods=["POST"])
+def checklist_new():
+    """Upload a brand-new checklist type."""
+    if "file" not in request.files:
+        flash("No file selected.", "error")
+        return redirect(url_for("checklist_list"))
+
+    f = request.files["file"]
+    checklist_name = request.form.get("checklist_name", "").strip().lower().replace(" ", "_")
+    notes = request.form.get("notes", "").strip()
+    uploader = request.form.get("uploader", "").strip()
+
+    if not checklist_name:
+        flash("Checklist name is required.", "error")
+        return redirect(url_for("checklist_list"))
+    if not f.filename or not f.filename.lower().endswith(".txt"):
+        flash("Only .txt files are accepted.", "error")
+        return redirect(url_for("checklist_list"))
+
+    text = f.read().decode("utf-8", errors="replace")
+    errors = validate_template(text)
+    if errors:
+        flash("Validation failed: " + " | ".join(errors[:5]), "error")
+        return redirect(url_for("checklist_list"))
+
+    row, err = db.upload_checklist_version(checklist_name, f.filename, text, notes, uploader)
+    if err:
+        flash(err, "error")
+    else:
+        db.set_active_version(row["id"])
+        flash(f"New checklist '{checklist_name}' created (v1).", "success")
+    return redirect(url_for("checklist_detail", checklist_name=checklist_name))
+
+
+@app.route("/checklists/version/<int:version_id>/activate", methods=["POST"])
+def checklist_activate(version_id):
+    row = db.get_checklist_version(version_id)
+    if not row:
+        flash("Version not found.", "error")
+        return redirect(url_for("checklist_list"))
+    db.set_active_version(version_id)
+    flash(f"Version {row['version']} of '{row['checklist_name']}' is now active.", "success")
+    return redirect(url_for("checklist_detail", checklist_name=row["checklist_name"]))
+
+
+@app.route("/checklists/version/<int:version_id>/download")
+def checklist_download(version_id):
+    from flask import Response
+    row = db.get_checklist_version(version_id)
+    if not row:
+        flash("Version not found.", "error")
+        return redirect(url_for("checklist_list"))
+    fname = f"{row['checklist_name']}_v{row['version']}.txt"
+    return Response(
+        row["content"],
+        mimetype="text/plain",
+        headers={"Content-Disposition": f"attachment; filename={fname}"}
+    )
+
+
+@app.route("/checklists/validate", methods=["POST"])
+def checklist_validate():
+    """AJAX: validate uploaded .txt content and return preview + errors."""
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"ok": False, "errors": ["No file received."]})
+    try:
+        text = f.read().decode("utf-8")
+    except Exception:
+        return jsonify({"ok": False, "errors": ["Could not decode file as UTF-8."]})
+
+    errors = validate_template(text)
+    sections = parse_template_from_string(text) if not errors else []
+    summary = {
+        "sections": len(sections),
+        "steps": sum(
+            sum(1 for s in sec["steps"] if s["type"] == "STEP") for sec in sections
+        ),
+        "step_values": sum(
+            sum(1 for s in sec["steps"] if s["type"] == "STEP_VALUE") for sec in sections
+        ),
+        "photos": sum(
+            sum(1 for s in sec["steps"] if s["type"] == "PHOTO") for sec in sections
+        ),
+        "notes": sum(
+            sum(1 for s in sec["steps"] if s["type"] == "NOTE") for sec in sections
+        ),
+    }
+    return jsonify({"ok": len(errors) == 0, "errors": errors, "summary": summary})
+
+
+@app.route("/checklists/compare")
+def checklist_compare():
+    v1_id = request.args.get("v1", type=int)
+    v2_id = request.args.get("v2", type=int)
+    checklist_name = request.args.get("name", "")
+
+    versions = db.get_checklist_versions(checklist_name) if checklist_name else []
+    v1 = db.get_checklist_version(v1_id) if v1_id else None
+    v2 = db.get_checklist_version(v2_id) if v2_id else None
+
+    diff_lines = []
+    if v1 and v2:
+        import difflib
+        a = v1["content"].splitlines(keepends=True)
+        b = v2["content"].splitlines(keepends=True)
+        diff_lines = list(difflib.unified_diff(
+            a, b,
+            fromfile=f"v{v1['version']} ({v1['filename']})",
+            tofile=f"v{v2['version']} ({v2['filename']})",
+            lineterm=""
+        ))
+
+    return render_template("checklist_compare.html",
+                           checklist_name=checklist_name,
+                           versions=versions,
+                           v1=v1, v2=v2,
+                           diff_lines=diff_lines)
+
+
 # ─── API: browser timezone registration ──────────────────────────────────────
 
 @app.route("/api/tz", methods=["POST"])
@@ -371,6 +592,7 @@ def api_tz():
 if __name__ == "__main__":
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     port = int(config["app"].get("port", 5000))
+    _seed_checklists()  # Seed any disk .txt files into DB versions table
 
     # Send Telegram startup alert
     tg = config["telegram"] if "telegram" in config else {}

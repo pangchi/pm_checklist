@@ -24,12 +24,19 @@
     {% set s = all_sections[i] %}
     {% set s_steps = s.steps | selectattr('is_interactive') | list %}
     {% set s_done = s_steps | length > 0 and s_steps | map(attribute='key') | list | select('in', completed_keys) | list | length == s_steps | length %}
+    {# Only allow navigating to completed sections or current section #}
+    {% if s_done or i == section_idx %}
     <div class="crumb {% if s_done and i != section_idx %}crumb-done{% elif i == section_idx %}crumb-active{% endif %}"
-         title="{{ s.title }}"
+         title="{{ s.title }} (click to go)"
          style="cursor:pointer"
          onclick="window.location='{{ url_for('checklist_view', session_id=pm_session.id, section=i) }}'">
       {{ i + 1 }}
     </div>
+    {% else %}
+    <div class="crumb crumb-locked" title="{{ s.title }} — complete previous sections first">
+      {{ i + 1 }}
+    </div>
+    {% endif %}
   {% endfor %}
 </div>
 
@@ -47,7 +54,11 @@
           <span>{{ step.label }}</span>
         </div>
       {% else %}
-        <div class="step-item {% if step.key in completed_keys %}step-done{% endif %}"
+        {# locked = not yet done AND not the next active step #}
+        {% set is_done   = step.key in completed_keys %}
+        {% set is_active = step.key == next_step_key %}
+        {% set is_locked = not is_done and not is_active %}
+        <div class="step-item {% if is_done %}step-done{% elif is_active %}step-active{% elif is_locked %}step-locked{% endif %}"
              id="step-{{ step.key }}"
              data-key="{{ step.key }}"
              data-type="{{ step.type }}"
@@ -56,11 +67,11 @@
              data-label="{{ step.label|e }}">
 
           <div class="step-check-area">
-            <button class="check-btn {% if step.key in completed_keys %}checked{% endif %}"
+            <button class="check-btn {% if is_done %}checked{% endif %}"
                     onclick="handleStepCheck(this)"
-                    {% if step.key in completed_keys %}disabled{% endif %}
-                    title="Mark complete">
-              <span class="check-icon">{% if step.key in completed_keys %}✓{% else %}○{% endif %}</span>
+                    {% if is_done or is_locked %}disabled{% endif %}
+                    title="{% if is_locked %}Complete previous step first{% elif is_done %}Done{% else %}Mark complete{% endif %}">
+              <span class="check-icon">{% if is_done %}✓{% elif is_locked %}🔒{% else %}○{% endif %}</span>
             </button>
           </div>
 
@@ -78,7 +89,7 @@
                        id="val-{{ step.key }}"
                        placeholder="Enter measured value..."
                        value="{{ ev.value_input if ev and ev.value_input else '' }}"
-                       {% if step.key in completed_keys %}disabled{% endif %}>
+                       {% if is_done or is_locked %}disabled{% endif %}>
                 <span class="value-required-hint">* Value required before checking</span>
               </div>
             {% endif %}
@@ -98,7 +109,7 @@
                        accept="image/*,.pdf" capture="environment" style="display:none"
                        onchange="handlePhotoUpload(this)"
                        data-step-key="{{ step.key }}"
-                       {% if step.key in completed_keys %}disabled{% endif %}>
+                       {% if is_done or is_locked %}disabled{% endif %}>
                 <span class="photo-filename" id="photo-name-{{ step.key }}"></span>
               </div>
             {% endif %}
@@ -221,7 +232,8 @@ async function handleStepCheck(btn) {
     const data = await res.json();
 
     if (data.success) {
-      // UI: mark done
+      // Mark this step done
+      stepItem.classList.remove('step-active', 'step-locked');
       stepItem.classList.add('step-done');
       btn.classList.add('checked');
       btn.innerHTML = '<span class="check-icon">✓</span>';
@@ -239,6 +251,8 @@ async function handleStepCheck(btn) {
         tsEl.classList.add('ts-live');
       }
 
+      // Unlock the next step in sequence
+      unlockNextStep(stepItem);
       checkSectionComplete();
     } else {
       btn.disabled = false;
@@ -283,6 +297,33 @@ async function handlePhotoUpload(input) {
   } catch (e) {
     label.textContent = '📷 Upload Error — Retry';
     showStepError(key, 'Network error during upload.');
+  }
+}
+
+function unlockNextStep(doneItem) {
+  // Find the next .step-locked sibling (skipping notes) and activate it
+  let el = doneItem.nextElementSibling;
+  while (el) {
+    if (el.classList.contains('step-locked')) {
+      el.classList.remove('step-locked');
+      el.classList.add('step-active');
+      const btn = el.querySelector('.check-btn');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="check-icon">○</span>';
+        btn.title = 'Mark complete';
+      }
+      const valEl = el.querySelector('.value-input');
+      if (valEl) valEl.disabled = false;
+      const photoEl = el.querySelector('.photo-input');
+      if (photoEl) photoEl.disabled = false;
+      const photoLabel = el.querySelector('.photo-upload-btn');
+      if (photoLabel) photoLabel.style.opacity = '1';
+      // Scroll the newly unlocked step into view on mobile
+      el.scrollIntoView({behavior: 'smooth', block: 'center'});
+      break;
+    }
+    el = el.nextElementSibling;
   }
 }
 

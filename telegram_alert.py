@@ -41,25 +41,31 @@ def send_startup_alert(bot_token: str, chat_id: str, app_port: int = 5000):
     local_ip = _get_local_ip()
     public_ip = _get_public_ip()
 
+    local_url = f"http://{local_ip}:{app_port}"
+
     lines = [
-        "🟢 *PM Checklist — Server Started*",
+        "🟢 <b>PM Checklist — Server Started</b>",
         "",
-        f"🖥 Hostname: `{hostname}`",
-        f"🔌 Local IP: `{local_ip}:{app_port}`",
+        f"🖥 Hostname: <code>{hostname}</code>",
+        f"🔌 Local IP: <code>{local_ip}:{app_port}</code>",
     ]
     if public_ip:
-        lines.append(f"🌐 Public IP: `{public_ip}`")
+        lines.append(f"🌐 Public IP: <code>{public_ip}</code>")
     lines += [
         "",
-        f"🔗 Access: `http://{local_ip}:{app_port}`",
+        f'🔗 Access: <a href="{local_url}">{local_url}</a>',
     ]
+    if public_ip:
+        public_url = f"http://{public_ip}:{app_port}"
+        lines.append(f'🌍 Public: <a href="{public_url}">{public_url}</a>')
 
     text = "\n".join(lines)
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = json.dumps({
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
     }).encode()
 
     req = urllib.request.Request(

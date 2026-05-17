@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Compare — {{ checklist_name.replace('_',' ').title() }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Compare Versions — {{ checklist_name.replace('_',' ').title() }}</h1>
+  <a href="{{ url_for('checklist_detail', checklist_name=checklist_name) }}" class="btn btn-outline">← Back</a>
+</div>
+
+<section class="card">
+  <h2>Select Versions to Compare</h2>
+  <form method="GET" action="{{ url_for('checklist_compare') }}" class="compare-form">
+    <input type="hidden" name="name" value="{{ checklist_name }}">
+    <div class="compare-selects">
+      <div class="field">
+        <label>Version A (from)</label>
+        <select name="v1">
+          <option value="">— Select —</option>
+          {% for v in versions %}
+          <option value="{{ v.id }}" {% if v1 and v1.id == v.id %}selected{% endif %}>
+            v{{ v.version }} — {{ v.uploaded_at | localdt('%Y-%m-%d') }}
+            {% if v.is_active %}(Active){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="compare-arrow">⇄</div>
+      <div class="field">
+        <label>Version B (to)</label>
+        <select name="v2">
+          <option value="">— Select —</option>
+          {% for v in versions %}
+          <option value="{{ v.id }}" {% if v2 and v2.id == v.id %}selected{% endif %}>
+            v{{ v.version }} — {{ v.uploaded_at | localdt('%Y-%m-%d') }}
+            {% if v.is_active %}(Active){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Compare →</button>
+  </form>
+</section>
+
+{% if v1 and v2 %}
+<section class="card">
+  <h2>
+    Diff: <code>v{{ v1.version }}</code>
+    <span style="color:var(--text-muted)">→</span>
+    <code>v{{ v2.version }}</code>
+  </h2>
+
+  <div class="diff-meta">
+    <div class="diff-meta-col">
+      <div class="diff-version-label label-a">v{{ v1.version }}</div>
+      <div class="diff-info">
+        <span>📅 {{ v1.uploaded_at | localdt('%Y-%m-%d %H:%M') }}</span>
+        {% if v1.uploaded_by %}<span>👤 {{ v1.uploaded_by }}</span>{% endif %}
+        {% if v1.notes %}<span>📝 {{ v1.notes }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="diff-meta-col">
+      <div class="diff-version-label label-b">v{{ v2.version }}</div>
+      <div class="diff-info">
+        <span>📅 {{ v2.uploaded_at | localdt('%Y-%m-%d %H:%M') }}</span>
+        {% if v2.uploaded_by %}<span>👤 {{ v2.uploaded_by }}</span>{% endif %}
+        {% if v2.notes %}<span>📝 {{ v2.notes }}</span>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if diff_lines %}
+  <div class="diff-legend">
+    <span class="diff-add-pill">+ Added</span>
+    <span class="diff-rem-pill">− Removed</span>
+    <span class="diff-ctx-pill">  Unchanged</span>
+  </div>
+  <div class="diff-wrap">
+    <pre class="diff-pre">{% for line in diff_lines %}<span class="diff-line {% if line.startswith('+') and not line.startswith('+++') %}diff-add{% elif line.startswith('-') and not line.startswith('---') %}diff-rem{% elif line.startswith('@@') %}diff-hunk{% endif %}">{{ line | e }}</span>
+{% endfor %}</pre>
+  </div>
+  {% else %}
+  <div class="empty-msg">✅ No differences — both versions are identical.</div>
+  {% endif %}
+
+  <div style="display:flex;gap:0.75rem;margin-top:1rem;flex-wrap:wrap">
+    <a href="{{ url_for('checklist_download', version_id=v1.id) }}" class="btn btn-sm btn-outline">⬇ Download v{{ v1.version }}</a>
+    <a href="{{ url_for('checklist_download', version_id=v2.id) }}" class="btn btn-sm btn-outline">⬇ Download v{{ v2.version }}</a>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

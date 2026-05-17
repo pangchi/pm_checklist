@@ -9,6 +9,7 @@ from contextlib import contextmanager
 import configparser
 import os
 from datetime import datetime
+import hashlib
 
 _config = None
 
@@ -116,6 +117,21 @@ def init_db():
 
     CREATE INDEX IF NOT EXISTS idx_events_session ON checklist_events(session_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_wo    ON pm_sessions(wo_id);
+
+    CREATE TABLE IF NOT EXISTS checklist_versions (
+        id            SERIAL PRIMARY KEY,
+        checklist_name TEXT NOT NULL,       -- logical name, e.g. "weekly_pm"
+        version       INTEGER NOT NULL,
+        filename      TEXT NOT NULL,        -- original uploaded filename
+        content       TEXT NOT NULL,        -- full .txt file content
+        checksum      TEXT NOT NULL,        -- sha256 of content
+        notes         TEXT,                 -- uploader's change notes
+        uploaded_by   TEXT,
+        is_active     BOOLEAN DEFAULT FALSE,
+        uploaded_at   TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (checklist_name, version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cv_name ON checklist_versions(checklist_name);
     """
     with get_conn() as conn:
         cur = conn.cursor()
@@ -396,3 +412,159 @@ def get_resume_section(session_id, sections):
         if not all(s["key"] in completed for s in interactive):
             return section["index"]
     return len(sections)
+
+
+# ─── Checklist Versions ───────────────────────────────────────────────────────
+
+def _checksum(content: str) -> str:
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def seed_checklist_from_file(filepath: str, uploaded_by: str = "system"):
+    """Seed a .txt file into checklist_versions if not already present."""
+    import os
+    checklist_name = os.path.splitext(os.path.basename(filepath))[0]
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+    cs = _checksum(content)
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # Skip if identical checksum already exists for this name
+        cur.execute(
+            "SELECT id FROM checklist_versions WHERE checklist_name=%s AND checksum=%s",
+            (checklist_name, cs)
+        )
+        if cur.fetchone():
+            return None
+        # Use plain cursor for scalar fetch
+        pcur = conn.cursor()
+        pcur.execute(
+            "SELECT COALESCE(MAX(version),0)+1 FROM checklist_versions WHERE checklist_name=%s",
+            (checklist_name,)
+        )
+        version = pcur.fetchone()[0]
+        cur.execute(
+            """INSERT INTO checklist_versions
+               (checklist_name, version, filename, content, checksum, notes, uploaded_by, is_active)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,
+                 NOT EXISTS (SELECT 1 FROM checklist_versions WHERE checklist_name=%s AND is_active))
+               RETURNING *""",
+            (checklist_name, version, os.path.basename(filepath),
+             content, cs, "Initial import from file", uploaded_by,
+             checklist_name)
+        )
+        row = cur.fetchone()
+        # If this is the first version, make it active
+        if version == 1:
+            cur.execute(
+                "UPDATE checklist_versions SET is_active=TRUE WHERE id=%s",
+                (row["id"],)
+            )
+        return row
+
+
+def get_all_checklist_names():
+    """Return distinct checklist names that have at least one active version."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT checklist_name,
+                   MAX(version) AS latest_version,
+                   COUNT(*) AS total_versions,
+                   MAX(uploaded_at) AS last_updated,
+                   (SELECT filename FROM checklist_versions cv2
+                    WHERE cv2.checklist_name=cv.checklist_name AND cv2.is_active
+                    LIMIT 1) AS active_filename,
+                   (SELECT version FROM checklist_versions cv2
+                    WHERE cv2.checklist_name=cv.checklist_name AND cv2.is_active
+                    LIMIT 1) AS active_version
+            FROM checklist_versions cv
+            GROUP BY checklist_name
+            ORDER BY checklist_name
+        """)
+        return cur.fetchall()
+
+
+def get_checklist_versions(checklist_name: str):
+    """All versions for a checklist, newest first."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT * FROM checklist_versions
+            WHERE checklist_name=%s ORDER BY version DESC
+        """, (checklist_name,))
+        return cur.fetchall()
+
+
+def get_checklist_version(version_id: int):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM checklist_versions WHERE id=%s", (version_id,))
+        return cur.fetchone()
+
+
+def get_active_version(checklist_name: str):
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "SELECT * FROM checklist_versions WHERE checklist_name=%s AND is_active ORDER BY version DESC LIMIT 1",
+            (checklist_name,)
+        )
+        return cur.fetchone()
+
+
+def upload_checklist_version(checklist_name: str, filename: str,
+                              content: str, notes: str = "", uploaded_by: str = ""):
+    """Insert a new version. Returns (row, error_str)."""
+    cs = _checksum(content)
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # Reject identical content
+        cur.execute(
+            "SELECT version FROM checklist_versions WHERE checklist_name=%s AND checksum=%s",
+            (checklist_name, cs)
+        )
+        dup = cur.fetchone()
+        if dup:
+            return None, f"Content identical to existing version {dup['version']} — no change."
+        # Use plain cursor for scalar fetch
+        pcur = conn.cursor()
+        pcur.execute(
+            "SELECT COALESCE(MAX(version),0)+1 FROM checklist_versions WHERE checklist_name=%s",
+            (checklist_name,)
+        )
+        version = pcur.fetchone()[0]
+        cur.execute(
+            """INSERT INTO checklist_versions
+               (checklist_name, version, filename, content, checksum, notes, uploaded_by, is_active)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,FALSE) RETURNING *""",
+            (checklist_name, version, filename, content, cs, notes, uploaded_by)
+        )
+        return cur.fetchone(), None
+
+
+def set_active_version(version_id: int):
+    """Promote a version to active; deactivate all others for same name."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT checklist_name FROM checklist_versions WHERE id=%s", (version_id,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        name = row["checklist_name"]
+        cur.execute("UPDATE checklist_versions SET is_active=FALSE WHERE checklist_name=%s", (name,))
+        cur.execute("UPDATE checklist_versions SET is_active=TRUE  WHERE id=%s", (version_id,))
+        return True
+
+
+def get_available_checklists_from_db():
+    """Return list of {filename, display, checklist_name} for active versions."""
+    names = get_all_checklist_names()
+    result = []
+    for row in names:
+        name = row["checklist_name"]
+        display = name.replace("_", " ").title()
+        active_fn = row["active_filename"] or (name + ".txt")
+        result.append({"filename": active_fn, "display": display,
+                        "checklist_name": name})
+    return result

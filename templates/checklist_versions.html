@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}{{ checklist_name.replace('_',' ').title() }} — Versions{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ checklist_name.replace('_',' ').title() }}</h1>
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+    <a href="{{ url_for('checklist_compare', name=checklist_name) }}" class="btn btn-outline">⇄ Compare</a>
+    <a href="{{ url_for('checklist_list') }}" class="btn btn-outline">← All Checklists</a>
+  </div>
+</div>
+
+<div class="two-col">
+
+  {# Upload new version #}
+  <section class="card">
+    <h2>Upload New Version</h2>
+    {% if active %}
+    <div class="alert" style="background:rgba(0,200,255,0.07);border:1px solid var(--accent);color:var(--accent);margin-bottom:1rem;font-size:0.85rem;">
+      Active: <strong>v{{ active.version }}</strong> uploaded {{ active.uploaded_at | localdt('%Y-%m-%d %H:%M') }}
+      {% if active.uploaded_by %}by {{ active.uploaded_by }}{% endif %}
+    </div>
+    {% endif %}
+    <form id="upload-form" method="POST"
+          action="{{ url_for('checklist_upload', checklist_name=checklist_name) }}"
+          enctype="multipart/form-data" class="form-grid">
+      <div class="field">
+        <label>Template File (.txt) *</label>
+        <input type="file" name="file" accept=".txt" required
+               onchange="previewUpload(this)">
+      </div>
+      <div class="field">
+        <label>Uploader Name</label>
+        <input type="text" name="uploader" placeholder="Your name">
+      </div>
+      <div class="field">
+        <label>Change Notes</label>
+        <textarea name="notes" rows="3"
+                  placeholder="What changed in this version?"></textarea>
+      </div>
+
+      <div id="upload-preview" class="validate-preview" style="display:none"></div>
+
+      <button type="submit" id="upload-btn" class="btn btn-primary" disabled>
+        Upload Version
+      </button>
+    </form>
+  </section>
+
+  {# Version history #}
+  <section class="card">
+    <h2>Version History</h2>
+    {% if versions %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr><th>Ver.</th><th>Uploaded</th><th>By</th><th>Notes</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          {% for v in versions %}
+          <tr class="{{ 'row-active' if v.is_active }}">
+            <td><code>v{{ v.version }}</code></td>
+            <td style="white-space:nowrap">{{ v.uploaded_at | localdt('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ v.uploaded_by or '—' }}</td>
+            <td class="notes-cell">{{ v.notes or '—' }}</td>
+            <td>
+              {% if v.is_active %}
+                <span class="badge badge-open">Active</span>
+              {% else %}
+                <span class="badge" style="background:rgba(100,120,200,0.12);color:#8898ee">Archive</span>
+              {% endif %}
+            </td>
+            <td>
+              <div style="display:flex;gap:0.35rem;flex-wrap:wrap">
+                <a href="{{ url_for('checklist_download', version_id=v.id) }}"
+                   class="btn btn-sm btn-outline" title="Download">⬇</a>
+                <button onclick="showContent({{ v.id }}, 'v{{ v.version }}')"
+                        class="btn btn-sm btn-outline" title="View content">👁</button>
+                {% if not v.is_active %}
+                <form method="POST"
+                      action="{{ url_for('checklist_activate', version_id=v.id) }}"
+                      style="margin:0">
+                  <button type="submit" class="btn btn-sm btn-primary"
+                          onclick="return confirm('Activate v{{ v.version }}? This will replace the current active version.')">
+                    Activate
+                  </button>
+                </form>
+                {% endif %}
+                <a href="{{ url_for('checklist_compare', name=checklist_name, v1=v.id) }}"
+                   class="btn btn-sm btn-outline" title="Compare">⇄</a>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-list">
+      {% for v in versions %}
+      <div class="card-item {{ 'card-item-active' if v.is_active }}">
+        <div class="card-item-title">
+          <span><code>v{{ v.version }}</code> {% if v.is_active %}<span class="badge badge-open">Active</span>{% endif %}</span>
+          <span style="font-size:0.78rem;color:var(--text-muted)">{{ v.uploaded_at | localdt('%Y-%m-%d %H:%M') }}</span>
+        </div>
+        {% if v.notes %}<div class="card-item-meta">{{ v.notes }}</div>{% endif %}
+        <div class="card-item-footer">
+          <div style="display:flex;gap:0.35rem">
+            <a href="{{ url_for('checklist_download', version_id=v.id) }}" class="btn btn-sm btn-outline">⬇</a>
+            <button onclick="showContent({{ v.id }}, 'v{{ v.version }}')" class="btn btn-sm btn-outline">👁</button>
+          </div>
+          {% if not v.is_active %}
+          <form method="POST" action="{{ url_for('checklist_activate', version_id=v.id) }}" style="margin:0">
+            <button type="submit" class="btn btn-sm btn-primary">Activate</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="empty-msg">No versions yet.</p>
+    {% endif %}
+  </section>
+</div>
+
+{# Content viewer modal #}
+<div id="content-modal" class="modal-backdrop" style="display:none" onclick="closeModal(event)">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span id="modal-title">Version Content</span>
+      <button onclick="document.getElementById('content-modal').style.display='none'"
+              class="modal-close">✕</button>
+    </div>
+    <pre id="modal-body" class="content-pre"></pre>
+  </div>
+</div>
+
+<script>
+const VERSION_CONTENTS = {{ versions | map(attribute='id') | list | tojson }};
+const vdata = {};
+{% for v in versions %}
+vdata[{{ v.id }}] = {{ v.content | tojson }};
+{% endfor %}
+
+async function previewUpload(input) {
+  const preview = document.getElementById('upload-preview');
+  const btn = document.getElementById('upload-btn');
+  if (!input.files[0]) return;
+  preview.style.display = 'block';
+  preview.innerHTML = '<div class="validate-loading">⏳ Validating…</div>';
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  try {
+    const res = await fetch('/checklists/validate', {method:'POST', body:fd});
+    const data = await res.json();
+    renderPreview(preview, data);
+    btn.disabled = !data.ok;
+  } catch(e) {
+    preview.innerHTML = '<div class="validate-error">⚠ Validation error.</div>';
+  }
+}
+
+function renderPreview(el, data) {
+  const ok = data.ok;
+  const s  = data.summary || {};
+  let html = `<div class="validate-box ${ok ? 'validate-ok' : 'validate-fail'}">`;
+  html += `<div class="validate-status">${ok ? '✅ Valid' : '❌ Validation Failed'}</div>`;
+  if (ok && s.sections !== undefined) {
+    html += `<div class="validate-summary">`;
+    html += `<span>📂 ${s.sections} section${s.sections!==1?'s':''}</span>`;
+    html += `<span>☑ ${s.steps} step${s.steps!==1?'s':''}</span>`;
+    if (s.step_values) html += `<span>📝 ${s.step_values} value inputs</span>`;
+    if (s.photos)      html += `<span>📷 ${s.photos} photos</span>`;
+    html += '</div>';
+  }
+  if (data.errors && data.errors.length) {
+    html += '<ul class="validate-errors">';
+    data.errors.forEach(e => { html += `<li>⚠ ${e}</li>`; });
+    html += '</ul>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function showContent(vid, label) {
+  document.getElementById('modal-title').textContent = label + ' — Content';
+  document.getElementById('modal-body').textContent = vdata[vid] || '(not loaded)';
+  document.getElementById('content-modal').style.display = 'flex';
+}
+
+function closeModal(e) {
+  if (e.target.id === 'content-modal')
+    document.getElementById('content-modal').style.display = 'none';
+}
+</script>
+{% endblock %}
