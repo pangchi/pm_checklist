@@ -1,6 +1,6 @@
 # PM Checklist — Preventive Maintenance System
 
-A production-ready Flask + PostgreSQL application for managing digital preventive maintenance checklists. Supports multiple checklist types, sequential step enforcement, photo attachments, browser-local timestamps, Telegram startup alerts, mobile-responsive UI, full checklist versioning with diff comparison, automatic photo cleanup, and live UI theme switching.
+A production-ready Flask + PostgreSQL application for managing digital preventive maintenance checklists. Supports multiple checklist types with full versioning, sequential step enforcement, photo attachments with EXIF age validation, browser-local timestamps, Telegram alerts, mobile-responsive UI with theme selection, automatic photo cleanup, and corrective action sessions.
 
 ---
 
@@ -15,14 +15,15 @@ A production-ready Flask + PostgreSQL application for managing digital preventiv
 7. [Workflow](#workflow)
 8. [URL Reference](#url-reference)
 9. [Checklist Versioning](#checklist-versioning)
-10. [Telegram Alerts](#telegram-alerts)
-11. [Timezone Handling](#timezone-handling)
-12. [Mobile Support](#mobile-support)
-13. [Sequential Step Enforcement](#sequential-step-enforcement)
-14. [Storage Management](#storage-management)
-15. [UI Themes](#ui-themes)
-16. [Corrective Action Workflow](#corrective-action-workflow)
-17. [Changelog](#changelog)
+10. [Corrective Action Workflow](#corrective-action-workflow)
+11. [Telegram Alerts](#telegram-alerts)
+12. [Timezone Handling](#timezone-handling)
+13. [Mobile Support](#mobile-support)
+14. [Sequential Step Enforcement](#sequential-step-enforcement)
+15. [Photo EXIF Validation](#photo-exif-validation)
+16. [Storage Management](#storage-management)
+17. [UI Themes](#ui-themes)
+18. [Changelog](#changelog)
 
 ---
 
@@ -30,22 +31,23 @@ A production-ready Flask + PostgreSQL application for managing digital preventiv
 
 | Feature | Details |
 |---|---|
-| **Multiple checklist types** | Weekly, Monthly, Quarterly, Annual — or any custom type |
+| **Multiple checklist types** | Weekly, Monthly, Quarterly, Annual, Corrective Action — or any custom type |
 | **Checklist versioning** | Upload new versions, compare diffs, activate/archive, download |
 | **Sequential steps** | Steps must be completed in order; skipping blocked at UI and server level |
 | **Three step types** | `STEP` (checkbox), `STEP_VALUE` (checkbox + value input), `PHOTO` (checkbox + photo upload) |
+| **EXIF photo validation** | Photos rejected if EXIF timestamp is older than configured limit (default 60 min) |
 | **Notes** | `NOTE:` lines display as read-only informational banners |
 | **DB-gated advancement** | Next Section button only enables after every step confirmed written to DB |
 | **Session resume** | Returning to an in-progress session restores all completed steps, values, and photo filenames |
+| **Corrective actions** | Raise a linked corrective session mid-PM without losing progress on the main checklist |
 | **Auto WO numbering** | Work order numbers auto-generated as `WO-YYYYMMDD-NNN` |
 | **No duplicate sessions** | Only one active session allowed per work order |
 | **Browser timezone** | All timestamps displayed in browser's local timezone; DB stores UTC |
-| **Telegram startup alert** | Sends hostname, local IP, and public IP to a Telegram chat on startup |
-| **Telegram purge alert** | Notifies when photos are auto-deleted due to disk threshold |
+| **Telegram alerts** | Startup notification and auto-purge alerts with clickable links |
 | **Auto photo cleanup** | Oldest photos deleted automatically when disk usage exceeds configured threshold |
 | **Mobile-first UI** | Hamburger nav, card-list views, fixed bottom footer, camera capture for photos |
-| **UI themes** | 8 built-in colour themes, selectable via Settings page, applied instantly without page reload |
-| **Printable reports** | Full per-session audit trail with all values, timestamps, photo links |
+| **UI themes** | 8 built-in colour themes, selectable live without page reload |
+| **Printable reports** | Full per-session audit trail with values, timestamps, photo links, corrective actions |
 | **Auto DB creation** | Database and all tables created automatically on first run |
 | **Live migrations** | Schema updates applied via `ALTER TABLE … ADD COLUMN IF NOT EXISTS` on every startup |
 
@@ -58,21 +60,23 @@ pm_checklist/
 ├── app.py                          # Flask routes, Jinja filters, startup logic
 ├── db.py                           # All PostgreSQL logic, auto-DB/table creation
 ├── checklist_parser.py             # .txt template parser (file and string modes)
+├── exif_checker.py                 # EXIF timestamp extraction and age validation
 ├── telegram_alert.py               # Startup and purge Telegram notifications
 ├── storage_manager.py              # Disk monitoring and photo auto-purge
 ├── config.ini                      # ← All credentials and settings here
-├── requirements.txt
+├── requirements.txt                # Flask, psycopg2-binary, Werkzeug, Pillow
 │
 ├── checklists/                     # Seed .txt templates (auto-imported to DB on startup)
 │   ├── weekly_pm.txt
 │   ├── monthly_pm.txt
 │   ├── quarterly_pm.txt
-│   └── annual_pm.txt
+│   ├── annual_pm.txt
+│   └── corrective_action.txt
 │
 ├── static/
 │   ├── css/
 │   │   ├── style.css               # Full mobile-first base stylesheet
-│   │   └── themes/                 # One CSS file per theme (overrides :root variables)
+│   │   └── themes/                 # One CSS file per theme (overrides :root variables only)
 │   │       ├── industrial_dark.css
 │   │       ├── clean_light.css
 │   │       ├── midnight_navy.css
@@ -85,19 +89,19 @@ pm_checklist/
 │   └── uploads/                    # Photo files (session_<id>/<filename>)
 │
 └── templates/
-    ├── base.html                   # Nav, hamburger, TZ detection, theme CSS injection
-    ├── index.html                  # Dashboard with session list
-    ├── personnel.html              # Add/list personnel
-    ├── workorders.html             # Create/list work orders
+    ├── base.html                   # Nav, hamburger, TZ detection, theme injection
+    ├── index.html                  # Dashboard
+    ├── personnel.html              # Personnel management
+    ├── workorders.html             # Work order management
     ├── start_session.html          # Start or resume a PM session
-    ├── checklist.html              # Step-by-step checklist execution
+    ├── checklist.html              # Step-by-step execution + corrective action modal
     ├── complete.html               # Session completion summary
     ├── report.html                 # Printable audit report
     ├── checklists.html             # Checklist template library
     ├── checklist_versions.html     # Version history, upload, activate
-    ├── checklist_compare.html      # Side-by-side unified diff
-    ├── storage_status.html         # Disk usage dashboard and manual purge
-    └── settings.html               # UI theme picker and app info
+    ├── checklist_compare.html      # Unified diff between versions
+    ├── storage_status.html         # Disk usage dashboard
+    └── settings.html               # UI theme picker
 ```
 
 ---
@@ -107,7 +111,7 @@ pm_checklist/
 ### Prerequisites
 
 - Python 3.10+
-- PostgreSQL 13+ (local or remote)
+- PostgreSQL 13+
 
 ### Install
 
@@ -117,7 +121,7 @@ pip install -r requirements.txt
 
 ### Configure
 
-Edit `config.ini` (see [Configuration](#configuration) below).
+Edit `config.ini` — at minimum set the database password and a random `secret_key`.
 
 ### Run
 
@@ -126,175 +130,167 @@ python app.py
 ```
 
 On first run the app will:
-1. Connect to the `postgres` system database
-2. Create the `pm_checklist` database if it does not exist
-3. Create all tables and indexes
-4. Run schema migrations (safe to re-run on every start)
-5. Seed any `.txt` files from `checklists/` into the versioning table
-6. Check disk usage and purge oldest photos if already over threshold
-7. Send a Telegram startup alert (if configured)
-8. Start the Flask server at `http://0.0.0.0:5000`
+1. Create the `pm_checklist` database if it does not exist
+2. Create all tables and indexes
+3. Run schema migrations (safe to re-run on every start)
+4. Seed `.txt` files from `checklists/` into the versioning table
+5. Check disk usage and purge oldest photos if already over threshold
+6. Send a Telegram startup alert (if configured)
+7. Start the Flask server at `http://0.0.0.0:5000`
 
 ---
 
 ## Configuration
 
-All settings are in `config.ini`. No credentials or paths appear in code.
+All settings live in `config.ini`. No credentials appear in code.
 
 ```ini
 [database]
 host     = localhost
 port     = 5432
-name     = pm_checklist        # Created automatically if missing
+name     = pm_checklist        # auto-created if missing
 user     = postgres
 password = yourpassword
 
 [app]
-secret_key    = change-this-to-a-random-secret-key
-upload_folder = static/uploads
-max_upload_mb = 16
-debug         = true
-port          = 5000
-host          = 0.0.0.0
-# Default theme (overridden at runtime via Settings page, stored in DB)
+secret_key            = change-this-to-a-random-secret-key
+upload_folder         = static/uploads
+max_upload_mb         = 16
+debug                 = true
+port                  = 5000
+host                  = 0.0.0.0
+# Photos with EXIF older than this are rejected. 0 = disabled.
+photo_max_age_minutes = 60
+# Default theme — overridden at runtime via Settings page, stored in DB
 # Options: industrial_dark, clean_light, midnight_navy, forest_green,
 #          warm_amber, arctic_white, crimson_steel, pastel_studio
-theme         = industrial_dark
+theme                 = industrial_dark
 
 [checklist]
-template_dir = checklists      # Directory scanned for seed .txt files
+template_dir = checklists
 
 [telegram]
-# Get bot_token from @BotFather on Telegram
-# Get chat_id by messaging @userinfobot or getUpdates API
-bot_token =
-chat_id   =
+bot_token =    # from @BotFather
+chat_id   =    # from @userinfobot or getUpdates
 
 [storage]
-# Disk usage threshold (percentage) above which oldest photos are auto-deleted
 disk_threshold_pct = 80
-# Partition is auto-detected from the mount point where app.py resides.
-# No manual configuration needed.
+# Partition auto-detected from mount point where app.py resides — no config needed
 ```
 
 **Getting Telegram credentials:**
 1. Message `@BotFather` → `/newbot` → copy the token
-2. Message your bot, then visit `https://api.telegram.org/bot<TOKEN>/getUpdates` to find your `chat_id`
+2. Message your bot, then visit `https://api.telegram.org/bot<TOKEN>/getUpdates` for the `chat_id`
 
 ---
 
 ## Database Schema
 
 ### `personnel`
-| Column | Type | Description |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | SERIAL PK | |
 | `name` | TEXT | Full name |
 | `badge` | TEXT UNIQUE | Employee / badge ID |
-| `department` | TEXT | Optional department |
+| `department` | TEXT | Optional |
 | `created_at` | TIMESTAMPTZ | UTC |
 
 ### `work_orders`
-| Column | Type | Description |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | SERIAL PK | |
 | `wo_number` | TEXT UNIQUE | Auto-generated: `WO-YYYYMMDD-NNN` |
 | `equipment` | TEXT | Equipment name |
-| `description` | TEXT | Optional description |
-| `checklist_name` | TEXT | Logical checklist name (e.g. `quarterly_pm`) |
+| `description` | TEXT | Optional |
+| `checklist_name` | TEXT | Logical checklist name, e.g. `quarterly_pm` |
 | `status` | TEXT | `open` → `in_progress` → `completed` |
 | `created_at` | TIMESTAMPTZ | UTC |
 | `updated_at` | TIMESTAMPTZ | UTC |
 
 ### `pm_sessions`
-| Column | Type | Description |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | SERIAL PK | |
 | `wo_id` | FK → work_orders | |
 | `personnel_id` | FK → personnel | |
-| `template_name` | TEXT | Checklist name at session creation (immutable) |
-| `status` | TEXT | `in_progress` \| `completed` |
+| `template_name` | TEXT | Frozen at session creation |
+| `session_type` | TEXT | `planned` or `corrective` |
+| `parent_session_id` | FK → pm_sessions | Set for corrective sessions |
+| `issue_description` | TEXT | Out-of-control situation description (corrective only) |
+| `status` | TEXT | `in_progress` or `completed` |
 | `started_at` | TIMESTAMPTZ | UTC |
 | `completed_at` | TIMESTAMPTZ | UTC, null until done |
 
 ### `checklist_events`
-| Column | Type | Description |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | SERIAL PK | |
 | `session_id` | FK → pm_sessions | Cascade delete |
-| `section_index` | INTEGER | Zero-based section position |
-| `step_index` | INTEGER | Zero-based step position within section |
-| `step_key` | TEXT | `"{section}_{step}"` composite key |
-| `step_type` | TEXT | `STEP` \| `STEP_VALUE` \| `PHOTO` |
-| `step_label` | TEXT | Description text from template |
-| `checked` | BOOLEAN | Always TRUE (only completed steps recorded) |
+| `section_index` | INTEGER | Zero-based |
+| `step_index` | INTEGER | Zero-based within section |
+| `step_key` | TEXT | `"{section}_{step}"` |
+| `step_type` | TEXT | `STEP`, `STEP_VALUE`, or `PHOTO` |
+| `step_label` | TEXT | Description from template |
+| `checked` | BOOLEAN | Always TRUE |
 | `value_input` | TEXT | Entered measurement (STEP_VALUE only) |
-| `photo_path` | TEXT | Relative path under `static/uploads/` — set to NULL after auto-purge |
-| `timestamp` | TIMESTAMPTZ | UTC — exact moment the DB write succeeded |
+| `photo_path` | TEXT | Relative path under `static/uploads/`; NULL after auto-purge |
+| `timestamp` | TIMESTAMPTZ | UTC — exact DB write time |
 
 ### `checklist_versions`
-| Column | Type | Description |
+| Column | Type | Notes |
 |---|---|---|
 | `id` | SERIAL PK | |
 | `checklist_name` | TEXT | Logical name, e.g. `weekly_pm` |
 | `version` | INTEGER | Auto-incremented per checklist name |
 | `filename` | TEXT | Original uploaded filename |
 | `content` | TEXT | Full `.txt` file content |
-| `checksum` | TEXT | SHA-256 of content (duplicate detection) |
-| `notes` | TEXT | Uploader's change notes |
+| `checksum` | TEXT | SHA-256 (duplicate detection) |
+| `notes` | TEXT | Uploader change notes |
 | `uploaded_by` | TEXT | Uploader name |
-| `is_active` | BOOLEAN | Only one active version per checklist name |
+| `is_active` | BOOLEAN | One active version per checklist name |
 | `uploaded_at` | TIMESTAMPTZ | UTC |
 
 ### `app_settings`
-| Column | Type | Description |
+| Column | Type | Notes |
 |---|---|---|
-| `key` | TEXT PK | Setting identifier (e.g. `theme`) |
-| `value` | TEXT | Setting value (e.g. `midnight_navy`) |
-| `updated_at` | TIMESTAMPTZ | UTC — last changed |
+| `key` | TEXT PK | Setting identifier, e.g. `theme` |
+| `value` | TEXT | Setting value, e.g. `midnight_navy` |
+| `updated_at` | TIMESTAMPTZ | UTC |
 
 ---
 
 ## Checklist Template Format
 
-Templates are plain `.txt` files. Any text editor works. Files in `checklists/` are auto-seeded into the DB on startup; subsequent changes must be uploaded via the Templates UI.
+Templates are plain `.txt` files editable in any text editor. Files in `checklists/` are auto-seeded into the DB on startup. Subsequent changes must be uploaded via the Templates UI.
 
 ### Syntax
 
 | Prefix | Renders as |
 |---|---|
 | `# comment` | Ignored |
-| `SECTION: Title` | Section header (groups steps) |
+| `SECTION: Title` | Section header |
 | `STEP: Description` | Checkbox only |
-| `STEP_VALUE: Description` | Checkbox + required text input (measurement, reading, etc.) |
-| `PHOTO: Description` | Checkbox + required photo upload (camera on mobile) |
-| `NOTE: Text` | Read-only informational banner — not a step, not recorded |
+| `STEP_VALUE: Description` | Checkbox + required text input |
+| `PHOTO: Description` | Checkbox + required photo (EXIF validated) |
+| `NOTE: Text` | Read-only informational banner — not recorded |
 
 ### Example
 
 ```text
-# Quarterly PM Template
-
 SECTION: Safety & Permit
 
 NOTE: Obtain permit-to-work before proceeding.
 STEP: Lock Out / Tag Out (LOTO) applied
 STEP_VALUE: Record ambient temperature (°C)
 PHOTO: Photograph LOTO tags in place
-
-SECTION: Mechanical Inspection
-
-STEP: Inspect belts and pulleys for wear
-STEP_VALUE: Record belt tension (N)
-STEP: Lubricate all designated points
 ```
 
-### Validation Rules (enforced on upload)
+### Validation rules (enforced on every upload)
 
 - At least one `SECTION:` required
-- At least one interactive step (`STEP` / `STEP_VALUE` / `PHOTO`) required
+- At least one interactive step required
 - Every step keyword must have a non-empty description
-- Duplicate step labels flagged as warnings
+- Duplicate step labels warned
 - Unknown line prefixes reported with line numbers
 - File must be valid UTF-8
 
@@ -302,28 +298,27 @@ STEP: Lubricate all designated points
 
 ## Workflow
 
-### Setup (one-time)
+### Setup
 
-1. **Add Personnel** → `/personnel` — name, badge ID, department
-2. **Create Work Order** → `/workorders` — equipment name, select checklist type
+1. **Personnel** → `/personnel` — add name, badge ID, department
+2. **Work Order** → `/workorders` — add equipment name, select checklist type
 
-### Per PM Run
+### Per PM run
 
-1. **Start Session** → `/session/start` — select work order and technician
-   - If the WO already has an active session, you are redirected to resume it (no duplicates)
-2. **Execute Checklist** — one section at a time:
+1. **Start Session** → `/session/start` — select WO and technician
+   - If the WO already has an active session, redirected to resume it
+2. **Execute checklist** — one section at a time, steps in strict order:
    - `STEP` → tap the circle checkbox
-   - `STEP_VALUE` → enter a value, then tap the checkbox
-   - `PHOTO` → tap "Attach Photo" (opens camera on mobile), then tap the checkbox
-   - Each successful checkbox tap writes a timestamped row to `checklist_events`
-   - Steps must be completed **in sequence** — skipping is blocked in the UI and on the server
-   - The **Next Section** button only activates after all steps in the section are DB-confirmed
-3. **Complete** → review the summary page
-4. **Report** → `/session/<id>/report` — full audit trail, printable
+   - `STEP_VALUE` → enter a value first, then tap
+   - `PHOTO` → capture photo (camera opens on mobile), then tap — EXIF age is checked on upload
+   - Each tap writes a UTC timestamped row to `checklist_events` before the UI advances
+3. **Corrective action** → tap **⚠ Corrective Action** if an issue is found mid-PM (see [Corrective Action Workflow](#corrective-action-workflow))
+4. **Complete** → review the summary page
+5. **Report** → `/session/<id>/report` — full printable audit trail
 
-### Returning to an In-Progress Session
+### Returning to an in-progress session
 
-Navigating to `/session/<id>/checklist` (no `?section=`) automatically resumes at the first incomplete section. All previously completed steps, entered values, and uploaded photo filenames are restored from the database.
+Navigating to `/session/<id>/checklist` (no `?section=`) auto-resumes at the first incomplete section. All completed steps, entered values, and photo filenames are restored from the DB.
 
 ---
 
@@ -331,66 +326,97 @@ Navigating to `/session/<id>/checklist` (no `?section=`) automatically resumes a
 
 | URL | Method | Description |
 |---|---|---|
-| `/` | GET | Dashboard — recent sessions |
+| `/` | GET | Dashboard |
 | `/personnel` | GET | List personnel |
-| `/personnel/add` | POST | Add a new person |
+| `/personnel/add` | POST | Add a person |
 | `/workorders` | GET | List work orders |
-| `/workorders/add` | POST | Create work order (WO number auto-generated) |
+| `/workorders/add` | POST | Create WO (auto-numbered) |
 | `/session/start` | GET, POST | Start or resume a PM session |
 | `/session/<id>/checklist` | GET | Execute checklist (auto-resumes) |
-| `/session/<id>/step/check` | POST (JSON) | Record a step to DB |
-| `/session/<id>/upload_photo` | POST (multipart) | Upload a step photo |
+| `/session/<id>/step/check` | POST JSON | Record a step to DB |
+| `/session/<id>/upload_photo` | POST multipart | Upload + EXIF-validate a photo |
 | `/session/<id>/complete` | GET | Mark session complete |
 | `/session/<id>/report` | GET | Printable audit report |
-| `/checklists` | GET | Checklist template library |
-| `/checklists/<name>` | GET | Version history for one checklist |
+| `/session/<id>/corrective/start` | POST | Create linked corrective session |
+| `/session/<id>/corrective/modal` | GET | AJAX data for corrective modal |
+| `/checklists` | GET | Template library |
+| `/checklists/<name>` | GET | Version history |
 | `/checklists/<name>/upload` | POST | Upload new version |
-| `/checklists/new` | POST | Upload a brand-new checklist type |
+| `/checklists/new` | POST | Upload a new checklist type |
 | `/checklists/version/<id>/activate` | POST | Promote version to active |
-| `/checklists/version/<id>/download` | GET | Download version as `.txt` |
-| `/checklists/validate` | POST (multipart) | AJAX validate before upload |
+| `/checklists/version/<id>/download` | GET | Download as `.txt` |
+| `/checklists/validate` | POST multipart | AJAX validate before upload |
 | `/checklists/compare` | GET | Unified diff between two versions |
 | `/uploads/<path>` | GET | Serve uploaded photos |
 | `/admin/storage` | GET | Disk usage dashboard |
-| `/admin/storage/purge` | POST | Manually trigger photo purge |
+| `/admin/storage/purge` | POST | Manual photo purge |
 | `/settings` | GET, POST | UI theme selection |
-| `/settings/theme/<id>` | POST (AJAX) | Instant theme switch |
-| `/api/tz` | POST (JSON) | Register browser UTC offset (cookie) |
+| `/settings/theme/<id>` | POST AJAX | Instant theme switch |
+| `/api/tz` | POST JSON | Register browser UTC offset |
 
 ---
 
 ## Checklist Versioning
 
-Templates are stored in the `checklist_versions` table with full version history.
-
-### How it works
-
-- On startup, any `.txt` files in `checklists/` are **seeded** as v1 of their respective checklist (skipped if identical content already exists, detected via SHA-256)
-- Each upload increments the version counter for that checklist name
-- Uploading identical content (same SHA-256) is rejected — no no-op versions
-- Exactly one version per checklist name is marked `is_active = TRUE`
-- All new sessions use the **active version** at session creation time
-- Existing in-progress sessions are unaffected by version changes (the `template_name` is immutable per session)
-
-### Activate a version
-
-Go to **Templates → `<checklist name>`** → click **Activate** on any archived version. The previous active version is immediately demoted.
+- On startup, `.txt` files in `checklists/` are seeded as v1 of each checklist (idempotent via SHA-256)
+- Each new upload increments the version counter; duplicate content (same SHA-256) is rejected
+- Exactly one version per checklist name is `is_active = TRUE` at any time
+- New sessions use the active version; existing sessions are unaffected
+- Any archived version can be re-activated, downloaded, or compared at any time
 
 ### Compare versions
 
-1. From the version history page, click **⇄ Compare** on any version
-2. Select Version A (from) and Version B (to)
-3. A colour-coded unified diff is rendered: 🟢 added, 🔴 removed, blue chunk headers
-4. Download either version directly from the comparison page
+Select any two versions on the compare page for a colour-coded unified diff: 🟢 added, 🔴 removed, blue chunk headers (`@@`).
+
+---
+
+## Corrective Action Workflow
+
+An out-of-control situation found during a PM can be escalated into a linked corrective session without losing progress on the main checklist.
+
+### Raising a corrective action
+
+1. Tap **⚠ Corrective Action** in the section title bar
+2. Complete the modal — issue description (required), corrective checklist, optional technician reassignment
+3. The corrective session opens immediately; the main session stays `in_progress`
+
+### During the corrective session
+
+- An amber banner shows the recorded issue description
+- All standard rules apply: sequential steps, DB-gated advancement, photo capture
+- **← Return to Main** link is always visible
+
+### Tracking from the parent session
+
+- Amber chip bar lists all linked corrective sessions; completed ones turn green (✓)
+
+### In reports
+
+- Completion summary lists all corrective sessions with status and links
+- Audit report includes a full "Corrective Actions Raised" table
+- Corrective session report links back to the parent PM report
+
+### Built-in corrective action template (`corrective_action.txt`)
+
+7-section template covering the complete corrective lifecycle:
+
+| Section | Purpose |
+|---|---|
+| Immediate Response & Containment | LOTO, isolation, cordoning, photo of defect as found |
+| Situation Assessment | Failure mode, time of discovery, units affected, severity classification |
+| Root Cause Investigation | Root cause statement, contributing factors, evidence collection |
+| Corrective Repair | Parts list, repair procedure, torque values, LOTO removal |
+| Verification & Testing | Full operating cycle, parameters recorded, defect confirmed resolved |
+| Affected Product / Output Disposition | Conformance review, disposition decision, QA sign-off |
+| Preventive Measures & Documentation | Recurrence prevention, CMMS update, supervisor sign-off |
 
 ---
 
 ## Telegram Alerts
 
-The app sends two types of Telegram messages using `parse_mode="HTML"` with `<a href>` clickable links.
+Uses `parse_mode="HTML"` with `<a href>` clickable links. Silently skipped if credentials are blank.
 
 ### Startup alert
-
 ```
 🟢 PM Checklist — Server Started
 
@@ -403,7 +429,6 @@ The app sends two types of Telegram messages using `parse_mode="HTML"` with `<a 
 ```
 
 ### Photo purge alert
-
 ```
 🗑 PM Checklist — Auto Photo Purge
 
@@ -413,22 +438,20 @@ The app sends two types of Telegram messages using `parse_mode="HTML"` with `<a 
 📷 Remaining photos in DB: 38
 
 Deleted files:
-  • WO-20260301-001 / Compressor A — session_3/...
+  • WO-20260301-001 / Compressor A — session_3/photo.jpg
 ```
-
-Both alerts are silently skipped if `bot_token` or `chat_id` is blank in `config.ini`.
 
 ---
 
 ## Timezone Handling
 
-**Rule: store in UTC, display in browser local time.**
+**Rule: store UTC, display browser-local.**
 
-- All timestamp columns are `TIMESTAMPTZ` (UTC-aware)
-- On every page load, JS reads `new Date().getTimezoneOffset()` and POSTs the browser's UTC offset in minutes to `/api/tz`, stored in a 1-year cookie (`tz_offset`)
-- If the offset changes (DST, different device), the page reloads once
-- Server-side: Jinja filter `| localdt` converts UTC datetimes to browser-local before rendering
-- Client-side: live AJAX timestamps returned as ISO 8601 strings (`2026-05-16T10:30:00Z`), converted with `window.fmtUTC()`
+- All `TIMESTAMP` columns are `TIMESTAMPTZ` (UTC-aware)
+- JS reads `new Date().getTimezoneOffset()` on every page load, POSTs to `/api/tz`, stored in a 1-year cookie
+- If offset changes (DST, different device), page reloads once to re-render
+- Jinja filter `| localdt` converts UTC datetimes to browser-local for all server-rendered timestamps
+- Live AJAX timestamps returned as ISO 8601 strings; `window.fmtUTC()` converts client-side
 
 ---
 
@@ -436,273 +459,237 @@ Both alerts are silently skipped if `bot_token` or `chat_id` is blank in `config
 
 | Feature | Implementation |
 |---|---|
-| **Hamburger menu** | Replaces desktop nav links below 640 px; closes on backdrop tap |
-| **Card-list views** | Tables replaced by stacked cards on mobile |
-| **Fixed bottom footer** | Previous/Next buttons fixed above browser chrome on checklist page |
-| **44 px touch targets** | All buttons and checkboxes meet minimum touch target size |
-| **Camera capture** | `PHOTO` steps use `capture="environment"` — opens rear camera on mobile |
-| **No iOS zoom** | All inputs use `font-size: 1rem` to prevent iOS auto-zoom on focus |
-| **Scroll to next step** | After completing a step, the newly unlocked step scrolls into view |
+| Hamburger menu | Replaces desktop nav below 640 px; closes on backdrop tap |
+| Card-list views | Tables replaced by stacked cards on mobile |
+| Fixed bottom footer | Prev/Next buttons fixed above browser chrome on checklist page |
+| 44 px touch targets | All interactive elements meet minimum size |
+| Camera capture | `PHOTO` steps use `capture="environment"` — opens rear camera directly |
+| No iOS zoom | All inputs use `font-size: 1rem` |
+| Scroll to next step | Newly unlocked step scrolls into view automatically |
 
 ---
 
 ## Sequential Step Enforcement
 
-Steps within a section must be completed strictly in order. Skipping is blocked at two independent layers:
+Steps within a section must be completed strictly in order. Enforced at two independent layers:
 
-### UI layer
-- Only the **next incomplete step** is `step-active` (cyan left border, pulsing ring)
-- All subsequent steps are `step-locked`: dimmed, all inputs `disabled`, `pointer-events: none`
-- After DB confirmation, `unlockNextStep()` activates the next step and scrolls it into view
+**UI:** Only the next incomplete step is `step-active` (pulsing cyan ring). All subsequent steps are `step-locked` (dimmed, all inputs `disabled`). After DB confirmation, `unlockNextStep()` activates the next step.
 
-### Server layer
-`/session/<id>/step/check` walks all interactive steps in order before accepting any write. If any prior step is incomplete, the request is rejected with HTTP 400.
+**Server:** `/session/<id>/step/check` walks all interactive steps in order. If any prior step is missing from `checklist_events`, the request is rejected with HTTP 400.
 
-### Section navigation
-Future incomplete section breadcrumb crumbs are `crumb-locked` (dashed, non-clickable).
+**Breadcrumb:** Future incomplete sections are `crumb-locked` (dashed, non-clickable).
+
+---
+
+## Photo EXIF Validation
+
+Every photo uploaded to a `PHOTO` step is validated against its EXIF capture timestamp.
+
+### How it works
+
+1. File bytes are read into memory (not saved yet)
+2. Pillow reads EXIF tags in priority order: `DateTimeOriginal` → `DateTimeDigitized` → `DateTime`
+3. The EXIF local time is converted to UTC using the browser's stored `tz_offset` cookie
+4. Age is compared against `photo_max_age_minutes` (default: 60)
+
+### Decision table
+
+| Situation | Result |
+|---|---|
+| EXIF found, age ≤ 60 min | ✅ Accepted |
+| EXIF found, age > 60 min | ❌ Rejected — error includes timestamp and age in minutes |
+| EXIF in the future (clock skew) | ✅ Accepted with server-side warning log |
+| No EXIF found | ✅ Accepted — cannot penalise phones that strip metadata |
+| PDF file | ✅ Accepted — no EXIF concept |
+
+### Configuration
+
+```ini
+[app]
+photo_max_age_minutes = 60   # 0 = disable check entirely
+```
+
+### Error message shown to technician
+
+> *"Photo was taken 143 minutes ago (2026-05-17 08:22:11) — only photos taken within the last 60 minutes are accepted. Please take a new photo now."*
 
 ---
 
 ## Storage Management
 
-### Auto-purge behaviour
+### Auto-purge
 
-1. After every photo upload and on server startup, `shutil.disk_usage()` checks the partition where `app.py` resides
-2. **Partition is auto-detected** — `get_app_partition()` walks up the directory tree comparing `os.stat().st_dev` until the mount point boundary is found. Works correctly with SD cards, external drives, separate `/home` partitions, etc.
-3. If usage ≥ `disk_threshold_pct` (default 80%), the oldest photos (by `timestamp ASC`) are deleted from disk and `photo_path` is set to `NULL` in the DB
-4. Purging continues until disk usage drops below `threshold − 5%` or no photos remain
-5. A Telegram alert is sent with details of what was deleted
+1. After every photo upload and on startup, `shutil.disk_usage()` checks the partition where `app.py` resides
+2. **Partition auto-detected** — `get_app_partition()` walks the directory tree comparing `os.stat().st_dev` until the mount point boundary is found; works with SD cards, external drives, separate `/home` partitions
+3. If usage ≥ `disk_threshold_pct`, oldest photos (by `timestamp ASC`) are deleted from disk and `photo_path` is set to `NULL` in the DB
+4. Purging continues until usage drops below `threshold − 5%` or no photos remain
+5. Telegram purge alert sent with per-file detail
 
-### Storage status page (`/admin/storage`)
+### `/admin/storage` status page
 
-- Visual disk usage bar (colour: green → amber → red approaching threshold)
-- Total / used / free GB, auto-detected partition path
+- Visual disk usage bar (green → amber → red)
+- Total / used / free GB, detected partition path
 - Photo file count on disk vs DB record count
-- Manual purge button (with confirmation dialog)
+- Manual purge button with confirmation dialog
 
 ### Key design decisions
 
-- Purge is **atomic per file**: DB is only updated after the file is confirmed deleted from disk
-- If the file is missing from disk (already deleted), the DB record is still nulled
-- The `photo_path` field is set to `NULL` (not the row deleted) so the session event history is preserved
-- Up to 10 deleted file paths are included in the Telegram alert; excess count shown as "… and N more"
+- Purge is atomic per file: DB updated only after file is confirmed deleted
+- `photo_path` is set to `NULL`, not the row deleted — session event history preserved
+- Up to 10 file paths included in Telegram alert; excess shown as "… and N more"
 
 ---
 
 ## UI Themes
 
-Eight built-in colour themes, selectable via **Settings** in the navigation.
+8 built-in themes selectable from **Settings** in the navigation. Changes apply instantly — no page reload.
 
 | Theme | Style | Accent |
 |---|---|---|
-| **Industrial Dark** | Dark background, cyan accent | `#00c8ff` |
-| **Clean Light** | Light grey background, blue accent | `#2563eb` |
-| **Midnight Navy** | Deep navy, purple accent | `#7c6af7` |
-| **Forest Green** | Dark green, lime accent | `#4ade80` |
-| **Warm Amber** | Dark brown, amber accent | `#f59e0b` |
-| **Arctic White** | Cool white, sky blue accent | `#0ea5e9` |
-| **Crimson Steel** | Near-black, red accent | `#ef4444` |
-| **Pastel Studio** | Dark purple, lavender accent | `#c084fc` |
+| Industrial Dark | Default — dark, utilitarian | `#00c8ff` |
+| Clean Light | Light grey, professional | `#2563eb` |
+| Midnight Navy | Deep navy | `#7c6af7` |
+| Forest Green | Dark green | `#4ade80` |
+| Warm Amber | Brown tones | `#f59e0b` |
+| Arctic White | Cool white | `#0ea5e9` |
+| Crimson Steel | Near-black, red | `#ef4444` |
+| Pastel Studio | Dark purple, lavender | `#c084fc` |
 
 ### How it works
 
-- Each theme is a standalone CSS file in `static/css/themes/` that overrides only the `:root` CSS variables
-- The base `style.css` contains all layout and component rules — themes require no duplication
-- The active theme is stored in the `app_settings` DB table under key `theme`
-- On every page, `base.html` injects `<link id="theme-css" href="...themes/<active>.css">` after the base stylesheet
-- **Switching is instant**: clicking a theme card calls `POST /settings/theme/<id>` via AJAX, then updates the `<link>` `href` in-place — no page reload needed
-- The `config.ini` `[app] theme =` setting provides the fallback default before any DB setting exists
-- Adding a new theme: create `static/css/themes/mytheme.css` with the `:root` block, add an entry to the `THEMES` dict in `app.py`
+- Each theme is a single CSS file in `static/css/themes/` that overrides only `:root` variables
+- Active theme stored in `app_settings` DB table under key `theme`
+- `base.html` injects `<link id="theme-css">` after the base stylesheet on every page
+- Switching calls `POST /settings/theme/<id>` via AJAX, updates the `<link>` href in-place
+- `config.ini` `theme =` provides the fallback default before any DB setting exists
 
----
+### Adding a custom theme
 
-## Corrective Action Workflow
-
-An out-of-control situation — a cracked component, an out-of-spec reading, a safety concern — can be raised at any point during a planned PM session without losing progress on the main checklist.
-
-### Raising a corrective action
-
-1. Tap **⚠ Corrective Action** in the section title bar during any planned PM session
-2. Fill in the modal:
-   - **Issue Description** *(required)* — describe exactly what was found; stored permanently in the DB
-   - **Corrective Checklist** — select any available template (the dedicated `Corrective Action` template is recommended)
-   - **Assigned To** — defaults to the current technician; optionally reassign
-3. Tap **Start Corrective Action** — a new linked session opens immediately
-
-### During the corrective session
-
-- An **amber banner** at the top shows the recorded issue description
-- All standard rules apply: sequential steps, DB-gated section advancement, photo capture
-- **← Return to Main** link is always visible to navigate back to the parent session
-- Both sessions can be worked in any order; neither is blocked by the other
-
-### Tracking from the parent session
-
-- An **amber chip bar** appears below the checklist header listing every linked corrective session
-- Chips show the checklist name and status dot; completed sessions turn green (✓)
-- Clicking a chip navigates directly to that corrective session
-
-### In reports
-
-- **Completion summary** — lists all corrective sessions with status, Resume, and Report buttons
-- **Audit report** — "Corrective Actions Raised" table with issue text, technician, start time, and link to each corrective report
-- **Corrective session report** — shows the issue description and a back-link to the parent PM report
-
-### Corrective Action checklist template (`checklists/corrective_action.txt`)
-
-A dedicated 7-section template is included, covering the complete corrective action lifecycle:
-
-| Section | Purpose |
-|---|---|
-| **Immediate Response & Containment** | Stop operations, isolate equipment, LOTO, photograph the defect as found |
-| **Situation Assessment** | Record failure mode, time of discovery, units affected, severity classification |
-| **Root Cause Investigation** | 5-Why / fishbone analysis, evidence collection, root cause confirmation |
-| **Corrective Repair** | Parts list, repair procedure, torque values, foreign object clearance, LOTO removal |
-| **Verification & Testing** | Full operating cycle, parameter readings, defect confirmed resolved |
-| **Affected Product / Output Disposition** | Conformance review, non-conforming unit count, disposition decision, QA sign-off |
-| **Preventive Measures & Documentation** | Recurrence prevention, PM schedule review, CMMS update, supervisor sign-off |
-
-Any other checklist can also be used for a corrective action — the template selection is made at the point of raising, so custom corrective checklists can be added to the `checklists/` directory and uploaded via the Templates page.
+1. Create `static/css/themes/mytheme.css` with a `:root { }` block
+2. Add an entry to the `THEMES` dict in `app.py`
+3. Restart — it appears immediately on the Settings page
 
 ---
 
 ## Changelog
 
 ### v1.0 — Initial Release
-- Flask application with PostgreSQL backend
+- Flask + PostgreSQL backend with auto DB/table creation
 - Single editable `.txt` checklist template
 - Three step types: `STEP`, `STEP_VALUE`, `PHOTO`
 - Personnel and work order management
-- PM session tracking with section-by-section execution
+- PM session tracking, section-by-section execution
 - DB-gated Next Section button
 - Photo uploads stored to `static/uploads/`
 - Printable per-session audit report
-- Auto database and table creation on first startup
-- Separate `config.ini` for all credentials and settings
+- Separate `config.ini`
 
 ### v1.1 — Auto WO Number & Duplicate Session Guard
-- WO numbers auto-generated: `WO-YYYYMMDD-NNN`, daily sequence resets
-- Blocks starting a new session if WO already has one `in_progress`
-- Start Session page shows inline warning and Resume option for active WOs
+- WO numbers auto-generated: `WO-YYYYMMDD-NNN`, daily sequence
+- Blocks duplicate active sessions per WO
+- Start Session page warns and offers Resume when WO has an active session
 - Work Orders list shows pulsing **LIVE** badge and Resume button
-- `get_all_work_orders_enriched()` — single query joining active/latest session IDs
+- `get_all_work_orders_enriched()` single query for active/latest session IDs
 
 ### v1.2 — Multiple Checklist Types
 - `config.ini` `[checklist]` changed from `template_file` to `template_dir`
 - Any `.txt` in `checklists/` available as a checklist type
 - Four built-in templates: weekly, monthly, quarterly, annual
-- `work_orders` gains `checklist_name` column (with `ADD COLUMN IF NOT EXISTS` migration)
+- `work_orders` gains `checklist_name` column (migrated automatically)
 - WO creation includes checklist type dropdown
-- Session's checklist name frozen at creation time
+- Checklist name frozen on each session at creation time
 
 ### v1.3 — Browser Timezone
 - All timestamps stored as `TIMESTAMPTZ` (UTC)
-- Browser UTC offset detected via JS, POSTed to `/api/tz`, stored in cookie
+- Browser UTC offset detected on page load, stored in `tz_offset` cookie
 - Jinja filter `| localdt` converts UTC to browser-local for all server-rendered timestamps
 - Live AJAX timestamps returned as ISO 8601 strings, converted client-side with `window.fmtUTC()`
+- Page reloads once if offset changes (DST transition, different device)
 
 ### v1.4 — Telegram Startup Alert
-- New `telegram_alert.py` module (stdlib only)
+- New `telegram_alert.py` (stdlib only — no extra dependencies)
 - `config.ini` gains `[telegram]` section
-- Startup message includes hostname, local IP, public IP, clickable links
-- Uses `parse_mode="HTML"` with `<a href>` for reliable link rendering
-- Silently skipped if credentials are blank
+- Startup message: hostname, local IP, public IP, clickable HTML links
+- `parse_mode="HTML"` + `disable_web_page_preview` for reliable rendering
+- Silently skipped if credentials blank
 
 ### v1.5 — Mobile-Friendly UI
 - Full CSS rewrite: mobile-first, 640 px and 380 px breakpoints
 - Hamburger navigation with slide-down drawer
 - Data tables replaced by card-list views on mobile
-- Fixed bottom footer on checklist page
-- 44 × 44 px minimum touch targets
-- `capture="environment"` for direct camera access on PHOTO steps
-- `font-size: 1rem` on inputs to prevent iOS auto-zoom
+- Fixed bottom footer bar on checklist page
+- 44 × 44 px minimum touch targets on all interactive elements
+- `capture="environment"` on PHOTO file inputs for direct camera access
+- `font-size: 1rem` on all inputs to prevent iOS auto-zoom
 
 ### v1.6 — Sequential Step Enforcement
-- Steps must be completed in strict order; no skipping allowed
-- Three CSS states: `step-done`, `step-active` (pulsing), `step-locked` (dimmed)
-- `unlockNextStep()` activates next step after DB confirmation
+- Steps must be completed in strict order; skipping blocked
+- CSS states: `step-done` (✓), `step-active` (pulsing), `step-locked` (dimmed)
+- `unlockNextStep()` activates next step after DB confirmation and scrolls it into view
 - Server-side guard in `step_check` rejects out-of-order submissions with HTTP 400
-- Future section breadcrumb crumbs rendered as `crumb-locked`
+- Future section breadcrumb crumbs rendered as `crumb-locked` (dashed, non-clickable)
 
 ### v1.7 — Session Resume / Progress Restore
 - `get_session_events_dict()` returns all completed events keyed by `step_key`
-- `get_resume_section()` finds the first section with incomplete steps
+- `get_resume_section()` finds the first section with any incomplete step
 - Auto-redirect to resume section when no `?section=` in URL
-- Completed inputs rendered with stored values; photo steps show original filename
+- Completed `STEP_VALUE` inputs re-rendered with stored values
+- Completed `PHOTO` steps show original filename in upload label
+- Timestamps on already-completed steps show exact recorded UTC time (browser-local)
 - `uploadedPhotos` JS dict pre-populated from DB events
 
 ### v1.8 — Checklist Versioning
-- New `checklist_versions` DB table: content, SHA-256 checksum, version, uploader, active flag
-- `parse_template_from_string()` — parses from DB content, no file I/O
-- `validate_template()` — returns errors/warnings before upload
+- New `checklist_versions` DB table: full content, SHA-256, version number, uploader, active flag
+- `parse_template_from_string()` — parses from DB content string
+- `validate_template()` — returns errors and warnings before upload
 - Startup seeds disk `.txt` files into versions table (idempotent)
-- AJAX validation endpoint with summary (sections, steps, photos, values)
+- AJAX validation with summary (sections, steps, photos, values) before submit button enables
 - Unified diff via `difflib.unified_diff` with colour-coded rendering
-- Version activation: promote any archived version; previous active demoted atomically
-- **Bugfix:** `RealDictCursor.fetchone()[0]` `KeyError` fixed — scalar queries use plain cursor
+- Version activation: atomic promotion with previous version demoted
+- **Bugfix:** `RealDictCursor.fetchone()[0]` `KeyError` — scalar queries use plain cursor
 
 ### v1.9 — Automatic Photo Cleanup
-- New `storage_manager.py` — disk monitoring and photo purge (stdlib + psycopg2)
+- New `storage_manager.py` — disk monitoring and purge (stdlib + psycopg2)
 - `config.ini` gains `[storage]` section with `disk_threshold_pct`
 - Purge triggered after every photo upload and at startup
 - Oldest photos (by `timestamp ASC`) deleted until disk drops below `threshold − 5%`
-- `photo_path` set to `NULL` in DB after each file deletion (event row preserved)
-- Telegram purge alert via new `send_telegram_message()` helper
+- `photo_path` set to `NULL` in DB after each deletion (event row preserved)
+- Telegram purge alert via `send_telegram_message()` helper
 - `/admin/storage` status page with visual disk bar and manual purge button
 
 ### v1.10 — UI Themes & Settings Page
-- 8 built-in colour themes in `static/css/themes/`: Industrial Dark, Clean Light, Midnight Navy, Forest Green, Warm Amber, Arctic White, Crimson Steel, Pastel Studio
-- Each theme is a standalone CSS file overriding only `:root` variables — no duplication of layout rules
-- New `app_settings` DB table (key/value) for runtime-changeable settings persisted across restarts
-- `db.get_setting()`, `db.set_setting()`, `db.get_all_settings()` helpers
+- 8 built-in themes in `static/css/themes/` — each overrides only `:root` CSS variables
+- New `app_settings` DB table for runtime-changeable settings persisted across restarts
 - `app.context_processor` injects `active_theme`, `theme_meta`, `theme_css` into all templates
-- `base.html` dynamically injects `<link id="theme-css">` after base stylesheet
-- **Instant switching**: `POST /settings/theme/<id>` updates `<link>` `href` in-place via AJAX — no page reload
-- `config.ini` `[app] theme =` provides default before any DB setting exists
-- `/settings` page shows 8 visual swatch cards with mini app preview (nav, stat cards, checklist step)
-- Each swatch rendered using the target theme's own colours; active swatch highlighted with glow ring
-- Toast notification on theme change
-- **Settings** link added to desktop nav and mobile drawer
-- Adding a new theme: create CSS file in `themes/`, add entry to `THEMES` dict in `app.py`
+- Instant theme switching via AJAX — `<link>` `href` swapped in-place, no page reload
+- `/settings` page with 8 visual swatch cards, each rendered in that theme's own colours
+- Active swatch highlighted with glow ring; toast notification on change
+- `config.ini` `theme =` provides default before any DB setting exists
+- **Bugfix:** context processor wrapped in `try/except` — never raises even if DB not ready
 
 ### v1.11 — Corrective Action Sessions
+- `pm_sessions` gains three new columns (migrated automatically):
+  - `session_type` (`planned` / `corrective`)
+  - `parent_session_id` (FK to parent session)
+  - `issue_description` (out-of-control situation description)
+- **⚠ Corrective Action** button in section header opens a modal during any planned PM
+- Modal captures: issue description, corrective checklist selection, optional technician reassignment
+- Corrective session runs independently; parent session remains `in_progress`
+- Amber banner at top of corrective session shows issue description and Return to Main link
+- Amber chip bar on parent session tracks all linked corrective sessions (turns green when done)
+- Completion summary and audit report include full corrective action details and links
+- New seed template `checklists/corrective_action.txt` — 7 sections covering the complete corrective lifecycle
+- Dashboard filters to planned sessions only; corrective sessions flagged with ⚠ indicator
+- New routes: `POST /session/<id>/corrective/start`, `GET /session/<id>/corrective/modal`
 
-Out-of-control situations discovered during a PM can now trigger a linked corrective action checklist without abandoning the main session.
-
-**How to use:**
-1. During any active PM checklist, tap **⚠ Corrective Action** in the section header
-2. Describe the issue found (e.g. "Belt cracked — replacement required")
-3. Select the corrective checklist to follow (any available template)
-4. Optionally assign a different technician
-5. The corrective session opens immediately — complete it fully
-6. Return to the parent PM session via the **← Return to Main** button and continue
-
-**DB changes:**
-- `pm_sessions` gains three new columns (all added via `ADD COLUMN IF NOT EXISTS` migration):
-  - `session_type TEXT DEFAULT 'planned'` — `'planned'` for normal PM, `'corrective'` for corrective actions
-  - `parent_session_id INTEGER` — FK back to the parent session (corrective sessions only)
-  - `issue_description TEXT` — description of the out-of-control situation
-- `create_session()` updated to accept the new parameters
-- `get_corrective_sessions(parent_id)` — returns all corrective sessions for a given parent
-- Dashboard `get_recent_sessions()` filters to `session_type = 'planned'` only
-
-**UI features:**
-- **⚠ Corrective Action** button shown in the section header bar of every planned session
-- Clicking opens a modal with: issue description textarea, checklist selector, technician selector
-- Corrective sessions show an amber banner at the top with the issue description and a "← Return to Main" link
-- Active corrective sessions from the parent are shown in an amber chip bar below the header
-- Chips turn green when the corrective session is completed
-- Completion summary page lists all linked corrective sessions with status and report links
-- Audit report includes a **Corrective Actions Raised** table with issue, technician, timestamps
-- Corrective session reports show the issue and a link back to the parent report
-- Dashboard flags sessions with a ⚠ corrective indicator in the equipment column
-
-**New routes:**
-- `POST /session/<id>/corrective/start` — creates and redirects to a new corrective session
-- `GET /session/<id>/corrective/modal` — AJAX endpoint for modal data (checklists + personnel)
-
-**New template file (`checklists/corrective_action.txt`):**
-- 7 sections covering the complete corrective action lifecycle: Immediate Response & Containment, Situation Assessment, Root Cause Investigation, Corrective Repair, Verification & Testing, Affected Product Disposition, Preventive Measures & Documentation
-- Mix of `STEP`, `STEP_VALUE`, and `PHOTO` types throughout — evidence photos required at key stages
-- Auto-seeded into `checklist_versions` on next startup alongside other seed templates
-- Selectable as a corrective checklist from the modal, or used standalone as any other PM type
+### v1.12 — EXIF Photo Age Validation
+- New `exif_checker.py` module — Pillow-based EXIF extraction and age validation
+- `Pillow>=10.0.0` added to `requirements.txt`
+- Every `PHOTO` step upload checked against EXIF `DateTimeOriginal` / `DateTimeDigitized` / `DateTime`
+- Photos with EXIF older than `photo_max_age_minutes` (default 60) are rejected before saving
+- Error message includes exact EXIF timestamp and age: *"Photo was taken 143 minutes ago…"*
+- Photos with no EXIF (metadata stripped) allowed through — cannot penalise legitimate devices
+- PDF uploads bypass EXIF check (no EXIF concept)
+- EXIF local time converted to UTC using the browser's stored `tz_offset` cookie for accurate comparison
+- Future EXIF timestamps (device clock skew) allowed through with server-side warning log
+- `photo_max_age_minutes = 0` in `config.ini` disables the check entirely

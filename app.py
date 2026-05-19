@@ -14,6 +14,7 @@ from werkzeug.utils import secure_filename
 import db
 from checklist_parser import parse_template, get_interactive_steps, parse_template_from_string, validate_template
 from telegram_alert import send_startup_alert, send_telegram_message
+from exif_checker import check_photo_age
 from storage_manager import purge_if_needed, get_disk_usage_info, get_app_partition
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -457,24 +458,44 @@ def upload_photo(session_id):
     if file.filename == "":
         return jsonify({"success": False, "error": "No file selected"}), 400
 
-    if file and allowed_file(file.filename):
-        step_key = request.form.get("step_key", "unknown")
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        ext = file.filename.rsplit(".", 1)[1].lower()
-        filename = secure_filename(f"session{session_id}_{step_key}_{timestamp}.{ext}")
-        save_dir = os.path.join(app.config["UPLOAD_FOLDER"], f"session_{session_id}")
-        os.makedirs(save_dir, exist_ok=True)
-        filepath = os.path.join(save_dir, filename)
-        file.save(filepath)
-        # Return web-accessible relative path
-        rel_path = f"session_{session_id}/{filename}"
+    if not allowed_file(file.filename):
+        return jsonify({"success": False, "error": "File type not allowed"}), 400
 
-        # Check disk usage and purge oldest photos if threshold exceeded
-        _run_storage_check()
+    # Read bytes once for EXIF check + save
+    file_bytes = file.read()
+    ext = file.filename.rsplit(".", 1)[1].lower()
 
-        return jsonify({"success": True, "photo_path": rel_path, "filename": filename})
+    # EXIF age check — only for image files (not PDFs)
+    if ext != "pdf":
+        max_age = int(config["app"].get("photo_max_age_minutes", 60))
+        if max_age > 0:
+            # Pass browser UTC offset so EXIF local time can be compared to UTC correctly
+            tz_offset = _browser_offset_minutes()
+            result = check_photo_age(file_bytes, max_age_minutes=max_age,
+                                     server_utc_offset_minutes=tz_offset)
+            if not result["ok"]:
+                return jsonify({
+                    "success": False,
+                    "error": result["error"],
+                    "exif_age_minutes": round(result["age_minutes"], 1) if result["age_minutes"] else None,
+                }), 400
 
-    return jsonify({"success": False, "error": "File type not allowed"}), 400
+    step_key = request.form.get("step_key", "unknown")
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    filename = secure_filename(f"session{session_id}_{step_key}_{timestamp}.{ext}")
+    save_dir = os.path.join(app.config["UPLOAD_FOLDER"], f"session_{session_id}")
+    os.makedirs(save_dir, exist_ok=True)
+    filepath = os.path.join(save_dir, filename)
+
+    with open(filepath, "wb") as f_out:
+        f_out.write(file_bytes)
+
+    rel_path = f"session_{session_id}/{filename}"
+
+    # Check disk usage and purge oldest photos if threshold exceeded
+    _run_storage_check()
+
+    return jsonify({"success": True, "photo_path": rel_path, "filename": filename})
 
 
 @app.route("/uploads/<path:filename>")
