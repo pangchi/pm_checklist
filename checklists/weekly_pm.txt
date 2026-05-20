@@ -48,13 +48,13 @@ STEP: Check fuses and circuit breakers — replace if blown
 STEP_VALUE: Measure and record supply voltage (VAC)
 STEP_VALUE: Measure and record operating current (A)
 STEP: Verify all indicator lights function correctly
-STEP: Test emergency stop (E-Stop) functionality
+STEP: Test emergency stop (E-Stop) functionality [min=30]
 
 SECTION: Functional Verification
 
-STEP: Power on equipment and observe startup sequence
+STEP: Power on equipment and observe startup sequence [min=60]
 STEP_VALUE: Record startup time (seconds)
-STEP: Run equipment through full operating cycle
+STEP: Run equipment through full operating cycle [min=120]
 STEP_VALUE: Record peak operating temperature (°C)
 PHOTO: Photograph equipment in operating condition
 STEP: Confirm all alarms and interlocks are active

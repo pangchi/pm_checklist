@@ -61,6 +61,56 @@
 </section>
 
 <section class="card">
+  <h2>Telegram Notifications</h2>
+
+  {% if tg_configured %}
+  <div class="alert" style="background:rgba(0,232,122,0.08);border:1px solid var(--success);color:var(--success);margin-bottom:1rem;font-size:0.85rem">
+    ✓ Configured — bot token and chat ID are set in <code>config.ini</code>
+  </div>
+  {% else %}
+  <div class="alert alert-warn" style="margin-bottom:1rem;font-size:0.85rem">
+    ⚠ Not configured — add <code>bot_token</code> and <code>chat_id</code> to <code>[telegram]</code> in <code>config.ini</code>
+  </div>
+  {% endif %}
+
+  <div class="form-grid" style="max-width:480px">
+    <div class="field">
+      <label>Bot Token</label>
+      <input type="text" id="tg-token" placeholder="123456:ABCdef..."
+             value="{{ tg_bot_token }}" autocomplete="off" spellcheck="false">
+      <span class="value-required-hint">From @BotFather → /newbot</span>
+    </div>
+    <div class="field">
+      <label>Chat ID</label>
+      <input type="text" id="tg-chat" placeholder="-1001234567890 or 987654321"
+             value="{{ tg_chat_id }}" autocomplete="off" spellcheck="false">
+      <span class="value-required-hint">
+        Get it: message your bot, then visit
+        <code style="font-size:0.72rem">api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
+      </span>
+    </div>
+
+    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center">
+      <button onclick="testTelegram()" class="btn btn-outline" id="tg-test-btn">
+        📨 Send Test Message
+      </button>
+      <span id="tg-result" style="font-size:0.85rem"></span>
+    </div>
+
+    <div id="tg-hint" class="alert alert-warn" style="display:none;white-space:pre-line;font-size:0.82rem"></div>
+
+    <div style="font-size:0.82rem;color:var(--text-muted);line-height:1.6">
+      <strong>Setup steps:</strong><br>
+      1. Message <code>@BotFather</code> on Telegram → <code>/newbot</code> → copy the token<br>
+      2. <strong>Send any message</strong> to your bot (bots can't start conversations)<br>
+      3. Visit <code>api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> — find <code>"chat":{"id":…}</code><br>
+      4. Paste both values above and click Send Test Message<br>
+      5. If it works, copy the values into <code>config.ini</code> and restart
+    </div>
+  </div>
+</section>
+
+<section class="card">
   <h2>Application Info</h2>
   <div class="summary-row">
     <span>Active Theme</span>
@@ -99,6 +149,50 @@ function selectTheme(themeId) {
 
   // Show flash-style confirmation
   showThemeToast(names[themeId] || themeId);
+}
+
+async function testTelegram() {
+  const token = document.getElementById('tg-token').value.trim();
+  const chat  = document.getElementById('tg-chat').value.trim();
+  const btn   = document.getElementById('tg-test-btn');
+  const result= document.getElementById('tg-result');
+  const hint  = document.getElementById('tg-hint');
+
+  if (!token || !chat) {
+    result.style.color = 'var(--danger)';
+    result.textContent = '⚠ Enter both bot token and chat ID.';
+    return;
+  }
+
+  btn.disabled = true;
+  result.style.color = 'var(--text-muted)';
+  result.textContent = '⏳ Sending…';
+  hint.style.display = 'none';
+
+  const fd = new FormData();
+  fd.append('bot_token', token);
+  fd.append('chat_id', chat);
+
+  try {
+    const res  = await fetch('/settings/telegram/test', {method: 'POST', body: fd});
+    const data = await res.json();
+
+    if (data.ok) {
+      result.style.color = 'var(--success)';
+      result.textContent = '✓ ' + data.message;
+    } else {
+      result.style.color = 'var(--danger)';
+      result.textContent = '✗ ' + (data.error || 'Failed');
+      if (data.hint) {
+        hint.style.display = 'block';
+        hint.textContent = data.hint;
+      }
+    }
+  } catch(e) {
+    result.style.color = 'var(--danger)';
+    result.textContent = '✗ Network error — check console.';
+  }
+  btn.disabled = false;
 }
 
 function showThemeToast(name) {

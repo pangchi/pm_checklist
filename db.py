@@ -141,6 +141,24 @@ def init_db():
         value       TEXT NOT NULL,
         updated_at  TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS step_dwell_events (
+        id             SERIAL PRIMARY KEY,
+        session_id     INTEGER REFERENCES pm_sessions(id) ON DELETE CASCADE,
+        personnel_id   INTEGER REFERENCES personnel(id),
+        wo_id          INTEGER REFERENCES work_orders(id),
+        wo_number      TEXT NOT NULL,
+        step_key       TEXT NOT NULL,
+        section_index  INTEGER NOT NULL,
+        step_index     INTEGER NOT NULL,
+        step_label     TEXT NOT NULL,
+        min_seconds    INTEGER NOT NULL DEFAULT 0,
+        elapsed_seconds FLOAT NOT NULL,
+        was_early      BOOLEAN NOT NULL,
+        tapped_at      TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_dwell_session ON step_dwell_events(session_id);
+    CREATE INDEX IF NOT EXISTS idx_dwell_wo      ON step_dwell_events(wo_id);
     """
     with get_conn() as conn:
         cur = conn.cursor()
@@ -640,3 +658,59 @@ def get_all_settings() -> dict:
         cur = conn.cursor()
         cur.execute("SELECT key, value FROM app_settings")
         return {row[0]: row[1] for row in cur.fetchall()}
+
+
+# ─── Step Dwell Events ────────────────────────────────────────────────────────
+
+def record_dwell_event(session_id: int, step_key: str, section_index: int,
+                       step_index: int, step_label: str, min_seconds: int,
+                       elapsed_seconds: float, was_early: bool):
+    """Log every step tap attempt for dwell-time analytics."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # Fetch personnel_id, wo_id, wo_number from session
+        cur.execute(
+            """SELECT s.personnel_id, s.wo_id, w.wo_number
+               FROM pm_sessions s JOIN work_orders w ON w.id=s.wo_id
+               WHERE s.id=%s""",
+            (session_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        cur.execute(
+            """INSERT INTO step_dwell_events
+               (session_id, personnel_id, wo_id, wo_number,
+                step_key, section_index, step_index, step_label,
+                min_seconds, elapsed_seconds, was_early)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+            (session_id, row["personnel_id"], row["wo_id"], row["wo_number"],
+             step_key, section_index, step_index, step_label,
+             min_seconds, round(elapsed_seconds, 2), was_early)
+        )
+        return cur.fetchone()
+
+
+def get_dwell_events(session_id: int):
+    """Return all dwell events for a session ordered by tapped_at."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """SELECT * FROM step_dwell_events
+               WHERE session_id=%s ORDER BY tapped_at ASC""",
+            (session_id,)
+        )
+        return cur.fetchall()
+
+
+def get_step_first_tap(session_id: int, step_key: str):
+    """Return the first dwell event for a step (when user first tapped)."""
+    with get_conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """SELECT * FROM step_dwell_events
+               WHERE session_id=%s AND step_key=%s
+               ORDER BY tapped_at ASC LIMIT 1""",
+            (session_id, step_key)
+        )
+        return cur.fetchone()

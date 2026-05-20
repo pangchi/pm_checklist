@@ -57,8 +57,8 @@ STEP: LOTO removed — equipment cleared for testing
 SECTION: Verification & Testing
 
 NOTE: Do not return equipment to service without completing all verification steps.
-STEP: Equipment powered on — no abnormal alarms or indications
-STEP: Run equipment through one full operating cycle under observation
+STEP: Equipment powered on — no abnormal alarms or indications [min=60]
+STEP: Run equipment through one full operating cycle under observation [min=120]
 STEP_VALUE: Record key parameter readings after repair (e.g. current, pressure, temperature)
 STEP: Original defect or failure mode confirmed resolved
 STEP: No new defects or abnormalities observed during test run

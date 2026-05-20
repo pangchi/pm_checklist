@@ -702,3 +702,25 @@ textarea { resize: vertical; min-height: 72px; }
   .corrective-trigger-btn { font-size: 0.72rem; padding: 0.25rem 0.5rem; }
   .corrective-sessions-bar { gap: 0.4rem; }
 }
+
+/* ── Step minimum dwell time ─────────────────────────────────── */
+.step-min-time {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--warn);
+  font-family: var(--font-mono);
+  margin-top: 0.1rem;
+  transition: color 0.3s;
+}
+.min-time-icon { flex-shrink: 0; }
+
+/* Countdown pulses amber while counting */
+.step-active .step-min-time {
+  animation: dwellPulse 1s ease-in-out infinite;
+}
+@keyframes dwellPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}

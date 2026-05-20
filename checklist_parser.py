@@ -6,6 +6,22 @@ a structured list of sections and steps.
 
 VALID_STEP_TYPES = {"STEP", "STEP_VALUE", "PHOTO", "NOTE"}
 
+import re as _re
+_MIN_PATTERN = _re.compile(r'\[min=(\d+)\]', _re.IGNORECASE)
+
+
+def _extract_min_seconds(label: str) -> tuple[str, int]:
+    """
+    Strip [min=N] modifier from a step label and return (clean_label, seconds).
+    N is in seconds. Returns (label, 0) if no modifier present.
+    Example: "Inspect belt tension [min=120]" -> ("Inspect belt tension", 120)
+    """
+    m = _MIN_PATTERN.search(label)
+    if not m:
+        return label.strip(), 0
+    clean = _MIN_PATTERN.sub("", label).strip()
+    return clean, int(m.group(1))
+
 
 def parse_template(filepath: str) -> list[dict]:
     """
@@ -71,14 +87,16 @@ def parse_template(filepath: str) -> list[dict]:
                         step_idx = 0
 
                     sec_idx = current_section["index"]
+                    clean_label, min_secs = _extract_min_seconds(label)
                     step = {
                         "type": stype,
-                        "label": label,
+                        "label": clean_label,
                         "index": step_idx,
                         "key": f"{sec_idx}_{step_idx}",
                         "requires_value": stype == "STEP_VALUE",
                         "requires_photo": stype == "PHOTO",
                         "is_interactive": stype != "NOTE",
+                        "min_seconds": min_secs,
                     }
                     current_section["steps"].append(step)
                     if stype != "NOTE":
@@ -96,6 +114,7 @@ def parse_template(filepath: str) -> list[dict]:
                     "requires_value": False,
                     "requires_photo": False,
                     "is_interactive": True,
+                    "min_seconds": 0,
                 }
                 current_section["steps"].append(step)
                 step_idx += 1
@@ -140,12 +159,14 @@ def parse_template_from_string(text: str) -> list[dict]:
                     sections.append(current_section)
                     step_idx = 0
                 sec_idx = current_section["index"]
+                clean_label, min_secs = _extract_min_seconds(label)
                 step = {
-                    "type": stype, "label": label, "index": step_idx,
+                    "type": stype, "label": clean_label, "index": step_idx,
                     "key": f"{sec_idx}_{step_idx}",
                     "requires_value": stype == "STEP_VALUE",
                     "requires_photo": stype == "PHOTO",
                     "is_interactive": stype != "NOTE",
+                    "min_seconds": min_secs,
                 }
                 current_section["steps"].append(step)
                 if stype != "NOTE":
@@ -160,6 +181,7 @@ def parse_template_from_string(text: str) -> list[dict]:
                 "key": f"{current_section['index']}_{step_idx}",
                 "requires_value": False, "requires_photo": False,
                 "is_interactive": True,
+                "min_seconds": 0,
             }
             current_section["steps"].append(step)
             step_idx += 1
@@ -192,12 +214,13 @@ def validate_template(text: str) -> list[str]:
         matched = False
         for stype in VALID_STEP_TYPES:
             if line.upper().startswith(f"{stype}:"):
-                label = line[len(stype)+1:].strip()
-                if not label:
+                raw_label = line[len(stype)+1:].strip()
+                clean_label, min_secs = _extract_min_seconds(raw_label)
+                if not clean_label:
                     errors.append(f"Line {i}: {stype}: has no description.")
-                if label in seen_labels:
-                    errors.append(f"Line {i}: Duplicate step label: '{label[:60]}'")
-                seen_labels.append(label)
+                if clean_label in seen_labels:
+                    errors.append(f"Line {i}: Duplicate step label: '{clean_label[:60]}'")
+                seen_labels.append(clean_label)
                 if stype != "NOTE":
                     has_interactive = True
                 matched = True

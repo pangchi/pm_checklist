@@ -693,3 +693,53 @@ photo_max_age_minutes = 60   # 0 = disable check entirely
 - EXIF local time converted to UTC using the browser's stored `tz_offset` cookie for accurate comparison
 - Future EXIF timestamps (device clock skew) allowed through with server-side warning log
 - `photo_max_age_minutes = 0` in `config.ini` disables the check entirely
+
+### v1.13 — Step Minimum Dwell Time
+
+Steps can now specify a minimum time the technician must spend on them before they can be completed. Every tap is logged regardless of timing for full analytics.
+
+**Template syntax:**
+
+Add `[min=N]` to any step type (N = seconds):
+
+```text
+STEP: Power on equipment and observe startup sequence [min=60]
+STEP: Run equipment through full operating cycle [min=120]
+STEP: Test emergency stop (E-Stop) functionality [min=30]
+STEP_VALUE: Record operating current at full load (A) [min=45]
+PHOTO: Photograph equipment in operating condition [min=0]
+```
+
+The parser strips `[min=N]` from the displayed label — technicians see the clean description.
+
+**Behaviour:**
+
+- When a step becomes active, its countdown timer starts immediately
+- The checkbox button stays **locked** until the minimum time elapses
+- A live `⏱ Min. time: 47s remaining` counter pulses amber below the step
+- When time elapses, the counter turns green (`Min. time elapsed ✓`) and the button unlocks automatically
+- **Every tap is logged** to `step_dwell_events` regardless of whether the timer has expired — early taps are recorded with `was_early = TRUE` for analytics
+- Server also enforces minimum time: `step_check` rejects early submissions with HTTP 400 even if the UI is bypassed
+
+**New DB table — `step_dwell_events`:**
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | SERIAL PK | |
+| `session_id` | FK → pm_sessions | |
+| `personnel_id` | FK → personnel | |
+| `wo_id` | FK → work_orders | |
+| `wo_number` | TEXT | Denormalised for easy analytics |
+| `step_key` | TEXT | `"{section}_{step}"` |
+| `section_index` | INTEGER | |
+| `step_index` | INTEGER | |
+| `step_label` | TEXT | Clean label (without `[min=N]`) |
+| `min_seconds` | INTEGER | Configured minimum |
+| `elapsed_seconds` | FLOAT | How long since step activated |
+| `was_early` | BOOLEAN | TRUE if tapped before minimum elapsed |
+| `tapped_at` | TIMESTAMPTZ | UTC |
+
+**New routes:**
+- `POST /session/<id>/step/tap` — logs a tap attempt and returns `was_early` + `remaining_seconds`
+
+**Updated templates** (`checklists/weekly_pm.txt`, `checklists/corrective_action.txt`) — demonstrate the syntax with realistic minimum times (E-Stop 30 s, startup observation 60 s, full operating cycle 120 s).

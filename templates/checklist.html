@@ -102,7 +102,8 @@
              data-type="{{ step.type }}"
              data-section="{{ section_idx }}"
              data-step="{{ step.index }}"
-             data-label="{{ step.label|e }}">
+             data-label="{{ step.label|e }}"
+             data-min-seconds="{{ step.min_seconds }}">
 
           <div class="step-check-area">
             <button class="check-btn {% if is_done %}checked{% endif %}"
@@ -157,6 +158,12 @@
               <div class="step-timestamp" id="ts-{{ step.key }}" data-utc="{{ ev.timestamp.isoformat() if ev and ev.timestamp else '' }}">✓ {{ ev.timestamp | localdt if ev and ev.timestamp else 'Recorded' }}</div>
             {% else %}
               <div class="step-timestamp" id="ts-{{ step.key }}"></div>
+            {% endif %}
+            {% if step.min_seconds > 0 and step.key not in completed_keys %}
+              <div class="step-min-time" id="mintime-{{ step.key }}">
+                <span class="min-time-icon">⏱</span>
+                <span id="mintime-label-{{ step.key }}">Min. {{ step.min_seconds }}s required</span>
+              </div>
             {% endif %}
           </div>
         </div>
@@ -220,6 +227,49 @@ const uploadedPhotos = {};
   }
 })();
 
+// ── Dwell timer tracking ──────────────────────────────────────────────────────
+// stepActivatedAt[key] = Date.now() when the step became active
+const stepActivatedAt = {};
+const countdownTimers = {};  // key -> setInterval ID
+
+function startDwellTimer(stepItem) {
+  const key = stepItem.dataset.key;
+  const minSecs = parseInt(stepItem.dataset.minSeconds || '0');
+  if (!minSecs) return;
+
+  stepActivatedAt[key] = Date.now();
+  const labelEl = document.getElementById(`mintime-label-${key}`);
+  const btn = stepItem.querySelector('.check-btn');
+
+  // Keep button locked until timer expires
+  btn.disabled = true;
+
+  countdownTimers[key] = setInterval(() => {
+    const elapsed = (Date.now() - stepActivatedAt[key]) / 1000;
+    const remaining = Math.max(0, minSecs - elapsed);
+    if (labelEl) {
+      if (remaining > 0) {
+        labelEl.textContent = `Min. time: ${Math.ceil(remaining)}s remaining`;
+      } else {
+        labelEl.textContent = `Min. time elapsed ✓`;
+        labelEl.style.color = 'var(--success)';
+      }
+    }
+    if (remaining <= 0) {
+      clearInterval(countdownTimers[key]);
+      // Auto-unlock the button
+      btn.disabled = false;
+      btn.innerHTML = '<span class="check-icon">○</span>';
+      btn.title = 'Mark complete';
+    }
+  }, 250);
+}
+
+function getElapsedSeconds(key) {
+  if (!stepActivatedAt[key]) return 0;
+  return (Date.now() - stepActivatedAt[key]) / 1000;
+}
+
 async function handleStepCheck(btn) {
   const stepItem = btn.closest('.step-item');
   const key = stepItem.dataset.key;
@@ -227,6 +277,8 @@ async function handleStepCheck(btn) {
   const sectionIndex = parseInt(stepItem.dataset.section);
   const stepIndex = parseInt(stepItem.dataset.step);
   const stepLabel = stepItem.dataset.label;
+  const minSeconds = parseInt(stepItem.dataset.minSeconds || '0');
+  const elapsed = getElapsedSeconds(key);
 
   // Gather value input if needed
   let valueInput = null;
@@ -265,6 +317,8 @@ async function handleStepCheck(btn) {
         step_label: stepLabel,
         value_input: valueInput,
         photo_path: photoPath,
+        min_seconds: minSeconds,
+        elapsed_seconds: elapsed,
       })
     });
     const data = await res.json();
@@ -346,10 +400,12 @@ function unlockNextStep(doneItem) {
       el.classList.remove('step-locked');
       el.classList.add('step-active');
       const btn = el.querySelector('.check-btn');
+      const minSecs = parseInt(el.dataset.minSeconds || '0');
       if (btn) {
-        btn.disabled = false;
+        // Button stays disabled until timer runs if min_seconds > 0
+        btn.disabled = minSecs > 0;
         btn.innerHTML = '<span class="check-icon">○</span>';
-        btn.title = 'Mark complete';
+        btn.title = minSecs > 0 ? `Minimum ${minSecs}s required` : 'Mark complete';
       }
       const valEl = el.querySelector('.value-input');
       if (valEl) valEl.disabled = false;
@@ -357,6 +413,8 @@ function unlockNextStep(doneItem) {
       if (photoEl) photoEl.disabled = false;
       const photoLabel = el.querySelector('.photo-upload-btn');
       if (photoLabel) photoLabel.style.opacity = '1';
+      // Start dwell timer if step has a minimum time
+      if (minSecs > 0) startDwellTimer(el);
       // Scroll the newly unlocked step into view on mobile
       el.scrollIntoView({behavior: 'smooth', block: 'center'});
       break;
@@ -408,6 +466,14 @@ function shakeEl(el) {
   el.classList.add('shake');
   setTimeout(() => el.classList.remove('shake'), 600);
 }
+// Start dwell timer for the initially active step on page load
+(function() {
+  const activeStep = document.querySelector('.step-active');
+  if (activeStep) {
+    const minSecs = parseInt(activeStep.dataset.minSeconds || '0');
+    if (minSecs > 0) startDwellTimer(activeStep);
+  }
+})();
 </script>
 
 {# ── Corrective Action Modal ──────────────────────────────────────────────── #}

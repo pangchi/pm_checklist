@@ -186,27 +186,28 @@ def _run_storage_check():
     chat_id   = tg.get("chat_id",   "").strip()
 
     if bot_token and chat_id:
-        status_icon = "⚠" if summary["error"] else "🗑"
+        from html import escape as _esc
+        icon = "\u26a0" if summary["error"] else "\U0001f5d1"
         lines = [
-            f"{status_icon} <b>PM Checklist — Auto Photo Purge</b>",
+            f"{icon} <b>PM Checklist \u2014 Auto Photo Purge</b>",
             "",
-            f"📊 Disk was at <b>{summary['triggered_at_pct']}%</b> (threshold {threshold:.0f}%)",
-            f"✅ Disk now at <b>{summary['final_pct']}%</b>",
-            f"🗑 Deleted <b>{summary['deleted_count']}</b> photo(s) — freed <b>{summary['freed_human']}</b>",
-            f"📷 Remaining photos in DB: {summary['remaining_photos']}",
+            f"\U0001f4ca Disk was at <b>{summary['triggered_at_pct']}%</b> (threshold {threshold:.0f}%)",
+            f"\u2705 Disk now at <b>{summary['final_pct']}%</b>",
+            f"\U0001f5d1 Deleted <b>{summary['deleted_count']}</b> photo(s) \u2014 freed <b>{_esc(str(summary['freed_human']))}</b>",
+            f"\U0001f4f7 Remaining photos in DB: {summary['remaining_photos']}",
         ]
         if summary["deleted"]:
             lines.append("")
             lines.append("<b>Deleted files:</b>")
-            for d in summary["deleted"][:10]:   # cap at 10 to avoid huge messages
-                lines.append(
-                    f"  • {d['wo_number']} / {d['equipment']} — "
-                    f"<code>{d['photo_path']}</code>"
-                )
+            for d in summary["deleted"][:10]:
+                wo  = _esc(str(d.get("wo_number", "")))
+                eq  = _esc(str(d.get("equipment", "")))
+                pth = _esc(str(d.get("photo_path", "")))
+                lines.append(f"  \u2022 {wo} / {eq} \u2014 <code>{pth}</code>")
             if len(summary["deleted"]) > 10:
-                lines.append(f"  … and {len(summary['deleted']) - 10} more")
+                lines.append(f"  \u2026 and {len(summary['deleted']) - 10} more")
         if summary["error"]:
-            lines += ["", f"❌ Error: <code>{summary['error']}</code>"]
+            lines += ["", f"\u274c Error: <code>{_esc(str(summary['error']))}</code>"]
 
         send_telegram_message(bot_token, chat_id, "\n".join(lines))
 
@@ -379,6 +380,44 @@ def checklist_view(session_id):
     )
 
 
+@app.route("/session/<int:session_id>/step/tap", methods=["POST"])
+def step_tap(session_id):
+    """
+    AJAX: log a tap attempt for analytics regardless of min-time enforcement.
+    Returns how many seconds remain before the step can be completed.
+    """
+    data = request.get_json(force=True)
+    step_key     = data.get("step_key", "")
+    step_label   = data.get("step_label", "")
+    section_index = int(data.get("section_index", 0))
+    step_index   = int(data.get("step_index", 0))
+    min_seconds  = int(data.get("min_seconds", 0))
+    elapsed      = float(data.get("elapsed_seconds", 0))
+
+    was_early = min_seconds > 0 and elapsed < min_seconds
+    remaining = max(0, min_seconds - elapsed) if min_seconds > 0 else 0
+
+    try:
+        db.record_dwell_event(
+            session_id=session_id,
+            step_key=step_key,
+            section_index=section_index,
+            step_index=step_index,
+            step_label=step_label,
+            min_seconds=min_seconds,
+            elapsed_seconds=elapsed,
+            was_early=was_early,
+        )
+    except Exception as e:
+        app.logger.warning(f"dwell event log failed: {e}")
+
+    return jsonify({
+        "logged": True,
+        "was_early": was_early,
+        "remaining_seconds": round(remaining, 1),
+    })
+
+
 @app.route("/session/<int:session_id>/step/check", methods=["POST"])
 def step_check(session_id):
     """AJAX endpoint: record a step checkbox event to DB."""
@@ -391,6 +430,8 @@ def step_check(session_id):
     step_label = data.get("step_label")
     value_input = data.get("value_input") or None
     photo_path = data.get("photo_path") or None
+    min_seconds = int(data.get("min_seconds", 0))
+    elapsed_seconds = float(data.get("elapsed_seconds", 0))
 
     # Enforce sequential order — reject if a previous step is still incomplete
     from checklist_parser import get_interactive_steps as _gis
@@ -418,6 +459,26 @@ def step_check(session_id):
     # Photo must be uploaded before checking
     if step_type == "PHOTO" and not photo_path:
         return jsonify({"success": False, "error": "A photo must be attached before completing this step."}), 400
+
+    # Minimum dwell time enforcement
+    if min_seconds > 0 and elapsed_seconds < min_seconds:
+        remaining = round(min_seconds - elapsed_seconds, 1)
+        # Log the early attempt
+        try:
+            db.record_dwell_event(
+                session_id=session_id, step_key=step_key,
+                section_index=section_index, step_index=step_index,
+                step_label=step_label, min_seconds=min_seconds,
+                elapsed_seconds=elapsed_seconds, was_early=True,
+            )
+        except Exception:
+            pass
+        return jsonify({
+            "success": False,
+            "min_time_error": True,
+            "remaining_seconds": remaining,
+            "error": f"Minimum time not elapsed — {remaining:.0f}s remaining.",
+        }), 400
 
     try:
         row = db.record_step(
@@ -838,7 +899,12 @@ def settings():
         return redirect(url_for("settings"))
 
     active = db.get_setting("theme", DEFAULT_THEME)
-    return render_template("settings.html", themes=THEMES, active_theme=active)
+    tg = config["telegram"] if "telegram" in config else {}
+    tg_configured = bool(tg.get("bot_token","").strip() and tg.get("chat_id","").strip())
+    return render_template("settings.html", themes=THEMES, active_theme=active,
+                           tg_configured=tg_configured,
+                           tg_bot_token=tg.get("bot_token","").strip(),
+                           tg_chat_id=tg.get("chat_id","").strip())
 
 
 @app.route("/settings/theme/<theme_id>", methods=["POST"])
@@ -848,6 +914,103 @@ def set_theme(theme_id):
         return jsonify({"ok": False, "error": "Unknown theme"}), 400
     db.set_setting("theme", theme_id)
     return jsonify({"ok": True, "theme": theme_id})
+
+
+@app.route("/settings/telegram/test", methods=["POST"])
+def telegram_test():
+    """Send a test Telegram message and return detailed result."""
+    bot_token = request.form.get("bot_token", "").strip()
+    chat_id   = request.form.get("chat_id",   "").strip()
+
+    if not bot_token or not chat_id:
+        return jsonify({"ok": False, "error": "bot_token and chat_id are required."})
+
+    # First verify the token is valid by calling getMe
+    import urllib.request, urllib.error, json as _json
+    from html import escape as _esc
+    try:
+        me_url = f"https://api.telegram.org/bot{bot_token}/getMe"
+        with urllib.request.urlopen(me_url, timeout=10) as r:
+            me = _json.loads(r.read())
+            if not me.get("ok"):
+                return jsonify({"ok": False,
+                                "error": f"Invalid bot token: {me.get('description','unknown error')}"})
+            bot_name = me["result"].get("username","unknown")
+    except urllib.error.HTTPError as e:
+        try:
+            body = _json.loads(e.read())
+            return jsonify({"ok": False,
+                            "error": f"Token error (HTTP {e.code}): {body.get('description', str(e))}"})
+        except Exception:
+            return jsonify({"ok": False, "error": f"Token error: HTTP {e.code}"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Network error checking token: {e}"})
+
+    # Token valid — now try to send a test message
+    import socket
+    hostname = _esc(socket.gethostname())
+    msg = (
+        f"\u2705 <b>PM Checklist \u2014 Telegram Test</b>\n"
+        f"\n"
+        f"Bot: <code>@{_esc(bot_name)}</code>\n"
+        f"Host: <code>{hostname}</code>\n"
+        f"\n"
+        f"If you can read this, your Telegram config is correct."
+    )
+
+    # Call _send directly so we get the raw error description back
+    send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = _json.dumps({
+        "chat_id": chat_id,
+        "text": msg,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }).encode()
+    req = urllib.request.Request(
+        send_url, data=payload,
+        headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp = _json.loads(r.read())
+            if resp.get("ok"):
+                return jsonify({
+                    "ok": True,
+                    "bot": bot_name,
+                    "message": f"Test message sent to chat {chat_id}. Check Telegram."
+                })
+            desc = resp.get("description", "unknown")
+            return jsonify({"ok": False, "error": f"Telegram API: {desc}", "hint": _chat_id_hint(desc)})
+    except urllib.error.HTTPError as e:
+        try:
+            body = _json.loads(e.read())
+            desc = body.get("description", str(e))
+        except Exception:
+            desc = str(e)
+        return jsonify({"ok": False, "error": f"HTTP {e.code}: {desc}", "hint": _chat_id_hint(desc)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+def _chat_id_hint(error_desc: str) -> str:
+    """Return a helpful hint based on the Telegram error description."""
+    desc = error_desc.lower()
+    if "chat not found" in desc:
+        return (
+            "The chat_id is not recognised. Common fixes:\n"
+            "1. Send any message to your bot in Telegram first — bots cannot initiate chats.\n"
+            "2. For a group chat, add the bot to the group, then send a message.\n"
+            "3. Confirm your chat_id by visiting: "
+            "https://api.telegram.org/bot{TOKEN}/getUpdates after messaging the bot.\n"
+            "4. If using a channel, the chat_id must start with -100 (e.g. -1001234567890)."
+        )
+    if "bot was blocked" in desc:
+        return "The user has blocked the bot. Unblock it in Telegram and try again."
+    if "forbidden" in desc:
+        return "Bot does not have permission to send to this chat."
+    if "invalid token" in desc or "unauthorized" in desc:
+        return "The bot_token is invalid. Copy it exactly from @BotFather."
+    return ""
 
 
 # ─── API: browser timezone registration ──────────────────────────────────────
