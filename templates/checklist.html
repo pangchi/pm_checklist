@@ -107,8 +107,12 @@
 
           <div class="step-check-area">
             <button class="check-btn {% if is_done %}checked{% endif %}"
+                    {% if is_locked %}
+                    onclick="logLockedTap(this)"
+                    {% else %}
                     onclick="handleStepCheck(this)"
-                    {% if is_done or is_locked %}disabled{% endif %}
+                    {% endif %}
+                    {% if is_done %}disabled{% endif %}
                     title="{% if is_locked %}Complete previous step first{% elif is_done %}Done{% else %}Mark complete{% endif %}">
               <span class="check-icon">{% if is_done %}✓{% elif is_locked %}🔒{% else %}○{% endif %}</span>
             </button>
@@ -227,6 +231,52 @@ const uploadedPhotos = {};
   }
 })();
 
+// ── ISO 8601 local timestamp ─────────────────────────────────────────────────
+// Returns current local time as ISO 8601 with local UTC offset,
+// e.g. "2026-05-22T14:35:07+08:00"
+function nowLocalISO() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const offsetMin = -d.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const absMin = Math.abs(offsetMin);
+  const oh = pad(Math.floor(absMin / 60));
+  const om = pad(absMin % 60);
+  return (
+    d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+    'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) +
+    sign + oh + ':' + om
+  );
+}
+
+// Log a tap on a still-locked step (sequential lock, not min-time lock)
+async function logLockedTap(btn) {
+  const clickedAt = nowLocalISO();
+  const stepItem = btn.closest('.step-item');
+  const key          = stepItem.dataset.key;
+  const sectionIndex = parseInt(stepItem.dataset.section);
+  const stepIndex    = parseInt(stepItem.dataset.step);
+  const stepLabel    = stepItem.dataset.label;
+
+  // Visual nudge — shake the lock
+  btn.classList.add('shake');
+  setTimeout(() => btn.classList.remove('shake'), 600);
+
+  // Log the attempt silently
+  try {
+    await fetch(`/session/${SESSION_ID}/step/tap`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        step_key: key, step_label: stepLabel,
+        section_index: sectionIndex, step_index: stepIndex,
+        min_seconds: 0, elapsed_seconds: 0,
+        clicked_at_local: clickedAt,
+      })
+    });
+  } catch(e) { /* silent */ }
+}
+
 // ── Dwell timer tracking ──────────────────────────────────────────────────────
 // stepActivatedAt[key] = Date.now() when the step became active
 const stepActivatedAt = {};
@@ -271,6 +321,7 @@ function getElapsedSeconds(key) {
 }
 
 async function handleStepCheck(btn) {
+  const clickedAt = nowLocalISO();   // capture exact click time immediately
   const stepItem = btn.closest('.step-item');
   const key = stepItem.dataset.key;
   const stepType = stepItem.dataset.type;
@@ -319,6 +370,7 @@ async function handleStepCheck(btn) {
         photo_path: photoPath,
         min_seconds: minSeconds,
         elapsed_seconds: elapsed,
+        clicked_at_local: clickedAt,
       })
     });
     const data = await res.json();
@@ -336,10 +388,13 @@ async function handleStepCheck(btn) {
       const photoEl = document.getElementById(`photo-${key}`);
       if (photoEl) photoEl.disabled = true;
 
-      // Show timestamp
+      // Show timestamp — prefer the local click time captured on the device
       const tsEl = document.getElementById(`ts-${key}`);
       if (tsEl) {
-        tsEl.textContent = data.utc_ts ? `✓ ${window.fmtUTC(data.utc_ts)}` : '✓ Recorded';
+        const display = data.clicked_at_local
+          ? `✓ ${data.clicked_at_local.replace('T', ' ').substring(0, 19)}`
+          : data.utc_ts ? `✓ ${window.fmtUTC(data.utc_ts)}` : '✓ Recorded';
+        tsEl.textContent = display;
         tsEl.classList.add('ts-live');
       }
 

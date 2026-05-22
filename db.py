@@ -105,17 +105,18 @@ def init_db():
     );
 
     CREATE TABLE IF NOT EXISTS checklist_events (
-        id            SERIAL PRIMARY KEY,
-        session_id    INTEGER REFERENCES pm_sessions(id) ON DELETE CASCADE,
-        section_index INTEGER NOT NULL,
-        step_index    INTEGER NOT NULL,
-        step_key      TEXT NOT NULL,
-        step_type     TEXT NOT NULL,      -- STEP, STEP_VALUE, PHOTO
-        step_label    TEXT NOT NULL,
-        checked       BOOLEAN DEFAULT TRUE,
-        value_input   TEXT,
-        photo_path    TEXT,
-        timestamp     TIMESTAMPTZ DEFAULT NOW()
+        id               SERIAL PRIMARY KEY,
+        session_id       INTEGER REFERENCES pm_sessions(id) ON DELETE CASCADE,
+        section_index    INTEGER NOT NULL,
+        step_index       INTEGER NOT NULL,
+        step_key         TEXT NOT NULL,
+        step_type        TEXT NOT NULL,      -- STEP, STEP_VALUE, PHOTO
+        step_label       TEXT NOT NULL,
+        checked          BOOLEAN DEFAULT TRUE,
+        value_input      TEXT,
+        photo_path       TEXT,
+        clicked_at_local TEXT,              -- ISO 8601 with local offset from browser
+        timestamp        TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE INDEX IF NOT EXISTS idx_events_session ON checklist_events(session_id);
@@ -143,19 +144,20 @@ def init_db():
     );
 
     CREATE TABLE IF NOT EXISTS step_dwell_events (
-        id             SERIAL PRIMARY KEY,
-        session_id     INTEGER REFERENCES pm_sessions(id) ON DELETE CASCADE,
-        personnel_id   INTEGER REFERENCES personnel(id),
-        wo_id          INTEGER REFERENCES work_orders(id),
-        wo_number      TEXT NOT NULL,
-        step_key       TEXT NOT NULL,
-        section_index  INTEGER NOT NULL,
-        step_index     INTEGER NOT NULL,
-        step_label     TEXT NOT NULL,
-        min_seconds    INTEGER NOT NULL DEFAULT 0,
-        elapsed_seconds FLOAT NOT NULL,
-        was_early      BOOLEAN NOT NULL,
-        tapped_at      TIMESTAMPTZ DEFAULT NOW()
+        id               SERIAL PRIMARY KEY,
+        session_id       INTEGER REFERENCES pm_sessions(id) ON DELETE CASCADE,
+        personnel_id     INTEGER REFERENCES personnel(id),
+        wo_id            INTEGER REFERENCES work_orders(id),
+        wo_number        TEXT NOT NULL,
+        step_key         TEXT NOT NULL,
+        section_index    INTEGER NOT NULL,
+        step_index       INTEGER NOT NULL,
+        step_label       TEXT NOT NULL,
+        min_seconds      INTEGER NOT NULL DEFAULT 0,
+        elapsed_seconds  FLOAT NOT NULL,
+        was_early        BOOLEAN NOT NULL,
+        clicked_at_local TEXT,             -- ISO 8601 with local offset from browser
+        tapped_at        TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_dwell_session ON step_dwell_events(session_id);
     CREATE INDEX IF NOT EXISTS idx_dwell_wo      ON step_dwell_events(wo_id);
@@ -181,6 +183,12 @@ def init_db():
                 ALTER TABLE {tbl_col[0]}
                 ALTER COLUMN {tbl_col[1]} TYPE TIMESTAMPTZ
                 USING {tbl_col[1]} AT TIME ZONE 'UTC'
+            """)
+        # Migration: add clicked_at_local to checklist_events and step_dwell_events
+        for tbl in ("checklist_events", "step_dwell_events"):
+            cur.execute(f"""
+                ALTER TABLE {tbl}
+                ADD COLUMN IF NOT EXISTS clicked_at_local TEXT
             """)
         # Migration: add corrective action columns to pm_sessions
         for col_def in [
@@ -418,19 +426,19 @@ def get_recent_sessions(limit=20):
 # ─── Checklist Events ─────────────────────────────────────────────────────────
 
 def record_step(session_id, section_index, step_index, step_key, step_type,
-                step_label, value_input=None, photo_path=None):
+                step_label, value_input=None, photo_path=None, clicked_at_local=None):
     """Insert a checklist event. Returns the inserted row."""
     with get_conn() as conn:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             """INSERT INTO checklist_events
                (session_id, section_index, step_index, step_key, step_type,
-                step_label, checked, value_input, photo_path)
-               VALUES (%s,%s,%s,%s,%s,%s,TRUE,%s,%s)
+                step_label, checked, value_input, photo_path, clicked_at_local)
+               VALUES (%s,%s,%s,%s,%s,%s,TRUE,%s,%s,%s)
                ON CONFLICT DO NOTHING
                RETURNING *""",
             (session_id, section_index, step_index, step_key, step_type,
-             step_label, value_input, photo_path),
+             step_label, value_input, photo_path, clicked_at_local),
         )
         return cur.fetchone()
 
@@ -664,11 +672,11 @@ def get_all_settings() -> dict:
 
 def record_dwell_event(session_id: int, step_key: str, section_index: int,
                        step_index: int, step_label: str, min_seconds: int,
-                       elapsed_seconds: float, was_early: bool):
+                       elapsed_seconds: float, was_early: bool,
+                       clicked_at_local: str = None):
     """Log every step tap attempt for dwell-time analytics."""
     with get_conn() as conn:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        # Fetch personnel_id, wo_id, wo_number from session
         cur.execute(
             """SELECT s.personnel_id, s.wo_id, w.wo_number
                FROM pm_sessions s JOIN work_orders w ON w.id=s.wo_id
@@ -682,11 +690,11 @@ def record_dwell_event(session_id: int, step_key: str, section_index: int,
             """INSERT INTO step_dwell_events
                (session_id, personnel_id, wo_id, wo_number,
                 step_key, section_index, step_index, step_label,
-                min_seconds, elapsed_seconds, was_early)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+                min_seconds, elapsed_seconds, was_early, clicked_at_local)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
             (session_id, row["personnel_id"], row["wo_id"], row["wo_number"],
              step_key, section_index, step_index, step_label,
-             min_seconds, round(elapsed_seconds, 2), was_early)
+             min_seconds, round(elapsed_seconds, 2), was_early, clicked_at_local)
         )
         return cur.fetchone()
 

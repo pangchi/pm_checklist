@@ -387,12 +387,13 @@ def step_tap(session_id):
     Returns how many seconds remain before the step can be completed.
     """
     data = request.get_json(force=True)
-    step_key     = data.get("step_key", "")
-    step_label   = data.get("step_label", "")
-    section_index = int(data.get("section_index", 0))
-    step_index   = int(data.get("step_index", 0))
-    min_seconds  = int(data.get("min_seconds", 0))
-    elapsed      = float(data.get("elapsed_seconds", 0))
+    step_key         = data.get("step_key", "")
+    step_label       = data.get("step_label", "")
+    section_index    = int(data.get("section_index", 0))
+    step_index       = int(data.get("step_index", 0))
+    min_seconds      = int(data.get("min_seconds", 0))
+    elapsed          = float(data.get("elapsed_seconds", 0))
+    clicked_at_local = data.get("clicked_at_local") or None
 
     was_early = min_seconds > 0 and elapsed < min_seconds
     remaining = max(0, min_seconds - elapsed) if min_seconds > 0 else 0
@@ -407,6 +408,7 @@ def step_tap(session_id):
             min_seconds=min_seconds,
             elapsed_seconds=elapsed,
             was_early=was_early,
+            clicked_at_local=clicked_at_local,
         )
     except Exception as e:
         app.logger.warning(f"dwell event log failed: {e}")
@@ -430,8 +432,9 @@ def step_check(session_id):
     step_label = data.get("step_label")
     value_input = data.get("value_input") or None
     photo_path = data.get("photo_path") or None
-    min_seconds = int(data.get("min_seconds", 0))
-    elapsed_seconds = float(data.get("elapsed_seconds", 0))
+    min_seconds      = int(data.get("min_seconds", 0))
+    elapsed_seconds  = float(data.get("elapsed_seconds", 0))
+    clicked_at_local = data.get("clicked_at_local") or None
 
     # Enforce sequential order — reject if a previous step is still incomplete
     from checklist_parser import get_interactive_steps as _gis
@@ -470,6 +473,7 @@ def step_check(session_id):
                 section_index=section_index, step_index=step_index,
                 step_label=step_label, min_seconds=min_seconds,
                 elapsed_seconds=elapsed_seconds, was_early=True,
+                clicked_at_local=clicked_at_local,
             )
         except Exception:
             pass
@@ -490,21 +494,26 @@ def step_check(session_id):
             step_label=step_label,
             value_input=value_input,
             photo_path=photo_path,
+            clicked_at_local=clicked_at_local,
         )
         if row is None:
             # Already exists — still OK
-            return jsonify({"success": True, "already_done": True, "utc_ts": None})
+            return jsonify({"success": True, "already_done": True,
+                            "utc_ts": None, "clicked_at_local": None})
 
         # Return as UTC ISO string; browser converts to local time via fmtUTC()
         ts = row["timestamp"]
         if ts is not None:
-            # psycopg2 returns timezone-aware datetime for TIMESTAMPTZ
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
             utc_ts = ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         else:
             utc_ts = None
-        return jsonify({"success": True, "utc_ts": utc_ts})
+        return jsonify({
+            "success": True,
+            "utc_ts": utc_ts,
+            "clicked_at_local": row.get("clicked_at_local"),
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
