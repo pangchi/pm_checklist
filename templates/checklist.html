@@ -107,11 +107,7 @@
 
           <div class="step-check-area">
             <button class="check-btn {% if is_done %}checked{% endif %}"
-                    {% if is_locked %}
-                    onclick="logLockedTap(this)"
-                    {% else %}
                     onclick="handleStepCheck(this)"
-                    {% endif %}
                     {% if is_done %}disabled{% endif %}
                     title="{% if is_locked %}Complete previous step first{% elif is_done %}Done{% else %}Mark complete{% endif %}">
               <span class="check-icon">{% if is_done %}✓{% elif is_locked %}🔒{% else %}○{% endif %}</span>
@@ -231,50 +227,17 @@ const uploadedPhotos = {};
   }
 })();
 
-// ── ISO 8601 local timestamp ─────────────────────────────────────────────────
-// Returns current local time as ISO 8601 with local UTC offset,
-// e.g. "2026-05-22T14:35:07+08:00"
+// ── ISO 8601 local timestamp ──────────────────────────────────────────────────
 function nowLocalISO() {
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
-  const offsetMin = -d.getTimezoneOffset();
-  const sign = offsetMin >= 0 ? '+' : '-';
-  const absMin = Math.abs(offsetMin);
-  const oh = pad(Math.floor(absMin / 60));
-  const om = pad(absMin % 60);
-  return (
-    d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const ah = pad(Math.floor(Math.abs(off) / 60));
+  const am = pad(Math.abs(off) % 60);
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
     'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) +
-    sign + oh + ':' + om
-  );
-}
-
-// Log a tap on a still-locked step (sequential lock, not min-time lock)
-async function logLockedTap(btn) {
-  const clickedAt = nowLocalISO();
-  const stepItem = btn.closest('.step-item');
-  const key          = stepItem.dataset.key;
-  const sectionIndex = parseInt(stepItem.dataset.section);
-  const stepIndex    = parseInt(stepItem.dataset.step);
-  const stepLabel    = stepItem.dataset.label;
-
-  // Visual nudge — shake the lock
-  btn.classList.add('shake');
-  setTimeout(() => btn.classList.remove('shake'), 600);
-
-  // Log the attempt silently
-  try {
-    await fetch(`/session/${SESSION_ID}/step/tap`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        step_key: key, step_label: stepLabel,
-        section_index: sectionIndex, step_index: stepIndex,
-        min_seconds: 0, elapsed_seconds: 0,
-        clicked_at_local: clickedAt,
-      })
-    });
-  } catch(e) { /* silent */ }
+    sign + ah + ':' + am;
 }
 
 // ── Dwell timer tracking ──────────────────────────────────────────────────────
@@ -321,8 +284,27 @@ function getElapsedSeconds(key) {
 }
 
 async function handleStepCheck(btn) {
-  const clickedAt = nowLocalISO();   // capture exact click time immediately
   const stepItem = btn.closest('.step-item');
+
+  // If step is still sequentially locked, log the tap and shake — don't submit
+  if (stepItem.classList.contains('step-locked')) {
+    btn.classList.add('shake');
+    setTimeout(() => btn.classList.remove('shake'), 600);
+    fetch(`/session/${SESSION_ID}/step/tap`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        step_key: stepItem.dataset.key,
+        step_label: stepItem.dataset.label,
+        section_index: parseInt(stepItem.dataset.section),
+        step_index: parseInt(stepItem.dataset.step),
+        min_seconds: 0, elapsed_seconds: 0,
+      })
+    }).catch(() => {});
+    return;
+  }
+
+  const clickedAt = nowLocalISO();  // exact tap time in browser local timezone
   const key = stepItem.dataset.key;
   const stepType = stepItem.dataset.type;
   const sectionIndex = parseInt(stepItem.dataset.section);
@@ -356,60 +338,130 @@ async function handleStepCheck(btn) {
   btn.disabled = true;
   btn.innerHTML = '<span class="check-icon spin">↻</span>';
 
+  const payload = {
+    section_index: sectionIndex,
+    step_index: stepIndex,
+    step_key: key,
+    step_type: stepType,
+    step_label: stepLabel,
+    value_input: valueInput,
+    photo_path: photoPath,
+    min_seconds: minSeconds,
+    elapsed_seconds: elapsed,
+    clicked_at_local: clickedAt,
+  };
+
+  await submitStepWithRetry(btn, stepItem, key, payload, 1, clickedAt);
+}
+
+// ── Fetch with retry + extension-error detection ──────────────────────────────
+
+function isExtensionInterference(err) {
+  // The global fetch wrapper in base.html tags these with .isExtensionInterference
+  if (err && err.isExtensionInterference) return true;
+  // Fallback string check for any that slip through
+  const msg = (err && err.message || '').toLowerCase();
+  return msg.includes('extensioninterference') ||
+         msg.includes('message channel closed') ||
+         msg.includes('listener indicated an asynchronous');
+}
+
+async function checkStepAlreadySaved(stepKey) {
+  // Ask the server whether this step is already in checklist_events.
+  // Returns true if saved, false if not, null if the check itself failed.
+  try {
+    const r = await fetch(
+      `/session/${SESSION_ID}/step/status?key=${encodeURIComponent(stepKey)}`,
+      { method: 'GET' }
+    );
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d.saved === true;
+  } catch (e) {
+    return null;
+  }
+}
+
+function markStepDone(btn, stepItem, key, data, clickedAt) {
+  stepItem.classList.remove('step-active', 'step-locked');
+  stepItem.classList.add('step-done');
+  btn.classList.add('checked');
+  btn.innerHTML = '<span class="check-icon">✓</span>';
+  btn.disabled = true;
+
+  const valEl = document.getElementById(`val-${key}`);
+  if (valEl) valEl.disabled = true;
+  const photoEl = document.getElementById(`photo-${key}`);
+  if (photoEl) photoEl.disabled = true;
+
+  const tsEl = document.getElementById(`ts-${key}`);
+  if (tsEl) {
+    tsEl.textContent = clickedAt
+      ? `✓ ${clickedAt.replace('T', ' ').substring(0, 19)}`
+      : (data && data.utc_ts) ? `✓ ${window.fmtUTC(data.utc_ts)}` : '✓ Recorded';
+    tsEl.classList.add('ts-live');
+  }
+
+  unlockNextStep(stepItem);
+  checkSectionComplete();
+}
+
+async function submitStepWithRetry(btn, stepItem, key, payload, attempt, clickedAt) {
+  attempt = attempt || 1;
+  clickedAt = clickedAt || null;
+  const MAX_ATTEMPTS = 3;
+  const RETRY_DELAY_MS = [0, 800, 2000];  // immediate, 0.8s, 2s
+
   try {
     const res = await fetch(`/session/${SESSION_ID}/step/check`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        section_index: sectionIndex,
-        step_index: stepIndex,
-        step_key: key,
-        step_type: stepType,
-        step_label: stepLabel,
-        value_input: valueInput,
-        photo_path: photoPath,
-        min_seconds: minSeconds,
-        elapsed_seconds: elapsed,
-        clicked_at_local: clickedAt,
-      })
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
 
     if (data.success) {
-      // Mark this step done
-      stepItem.classList.remove('step-active', 'step-locked');
-      stepItem.classList.add('step-done');
-      btn.classList.add('checked');
-      btn.innerHTML = '<span class="check-icon">✓</span>';
-
-      // Disable value/photo inputs
-      const valEl = document.getElementById(`val-${key}`);
-      if (valEl) valEl.disabled = true;
-      const photoEl = document.getElementById(`photo-${key}`);
-      if (photoEl) photoEl.disabled = true;
-
-      // Show timestamp — prefer the local click time captured on the device
-      const tsEl = document.getElementById(`ts-${key}`);
-      if (tsEl) {
-        const display = data.clicked_at_local
-          ? `✓ ${data.clicked_at_local.replace('T', ' ').substring(0, 19)}`
-          : data.utc_ts ? `✓ ${window.fmtUTC(data.utc_ts)}` : '✓ Recorded';
-        tsEl.textContent = display;
-        tsEl.classList.add('ts-live');
-      }
-
-      // Unlock the next step in sequence
-      unlockNextStep(stepItem);
-      checkSectionComplete();
+      clearStepError(key);
+      markStepDone(btn, stepItem, key, data, clickedAt);
     } else {
       btn.disabled = false;
       btn.innerHTML = '<span class="check-icon">○</span>';
-      showStepError(key, data.error || 'Error recording step. Try again.');
+      showStepError(key, data.error || 'Error recording step. Please retry.');
     }
+
   } catch (e) {
+    const isExtErr = isExtensionInterference(e);
+
+    if (isExtErr || attempt < MAX_ATTEMPTS) {
+      // For extension interference: the request may have gone through.
+      // Check with the server before deciding whether to retry.
+      if (isExtErr) {
+        btn.innerHTML = '<span class="check-icon spin">↻</span>';
+        const saved = await checkStepAlreadySaved(key);
+        if (saved === true) {
+          // Server has it — treat as success
+          clearStepError(key);
+          markStepDone(btn, stepItem, key, null, clickedAt);
+          return;
+        }
+        // Not saved or check failed — fall through to retry
+      }
+
+      if (attempt < MAX_ATTEMPTS) {
+        const delay = RETRY_DELAY_MS[attempt] || 2000;
+        showStepError(key, `Connection issue — retrying (${attempt}/${MAX_ATTEMPTS - 1})…`);
+        await new Promise(r => setTimeout(r, delay));
+        return submitStepWithRetry(btn, stepItem, key, payload, attempt + 1, clickedAt);
+      }
+    }
+
+    // All retries exhausted or non-retriable error
     btn.disabled = false;
     btn.innerHTML = '<span class="check-icon">○</span>';
-    showStepError(key, 'Network error. Please retry.');
+    const hint = isExtErr
+      ? 'A browser extension interrupted the request. Try disabling extensions or use a private window.'
+      : 'Network error. Check your connection and retry.';
+    showStepError(key, hint);
   }
 }
 
@@ -422,28 +474,46 @@ async function handlePhotoUpload(input) {
   const nameEl = document.getElementById(`photo-name-${key}`);
   label.textContent = '⏳ Uploading...';
 
-  const fd = new FormData();
+  let fd = new FormData();
   fd.append('photo', file);
   fd.append('step_key', key);
 
-  try {
-    const res = await fetch(`/session/${SESSION_ID}/upload_photo`, {
-      method: 'POST', body: fd
-    });
-    const data = await res.json();
-    if (data.success) {
-      uploadedPhotos[key] = data.photo_path;
-      label.textContent = `📷 ${data.filename} ✓`;
-      label.classList.add('photo-done');
-      if (nameEl) nameEl.textContent = '';
-      clearStepError(key);
-    } else {
-      label.textContent = '📷 Upload Failed — Retry';
-      showStepError(key, data.error || 'Upload failed.');
+  let uploaded = false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(`/session/${SESSION_ID}/upload_photo`, {
+        method: 'POST', body: fd
+      });
+      const data = await res.json();
+      if (data.success) {
+        uploadedPhotos[key] = data.photo_path;
+        label.textContent = `📷 ${data.filename} ✓`;
+        label.classList.add('photo-done');
+        if (nameEl) nameEl.textContent = '';
+        clearStepError(key);
+        uploaded = true;
+      } else {
+        label.textContent = '📷 Upload Failed — Retry';
+        showStepError(key, data.error || 'Upload failed.');
+      }
+      break;  // success or server error — don't retry
+    } catch (e) {
+      if (isExtensionInterference(e) && attempt < 3) {
+        label.textContent = `⏳ Retrying upload (${attempt}/2)…`;
+        await new Promise(r => setTimeout(r, 600 * attempt));
+        // FormData can't be re-read after first use; rebuild it
+        fd = new FormData();
+        fd.append('photo', file);
+        fd.append('step_key', key);
+        continue;
+      }
+      label.textContent = '📷 Upload Error — Retry';
+      const hint = isExtensionInterference(e)
+        ? 'A browser extension is blocking the upload. Try a private/incognito window.'
+        : 'Network error during upload.';
+      showStepError(key, hint);
+      break;
     }
-  } catch (e) {
-    label.textContent = '📷 Upload Error — Retry';
-    showStepError(key, 'Network error during upload.');
   }
 }
 

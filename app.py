@@ -380,6 +380,16 @@ def checklist_view(session_id):
     )
 
 
+@app.route("/session/<int:session_id>/step/status", methods=["GET"])
+def step_status(session_id):
+    """Check whether a step has already been saved — used by retry logic."""
+    step_key = request.args.get("key", "")
+    if not step_key:
+        return jsonify({"saved": False})
+    completed = db.get_completed_steps(session_id)
+    return jsonify({"saved": step_key in completed})
+
+
 @app.route("/session/<int:session_id>/step/tap", methods=["POST"])
 def step_tap(session_id):
     """
@@ -387,13 +397,12 @@ def step_tap(session_id):
     Returns how many seconds remain before the step can be completed.
     """
     data = request.get_json(force=True)
-    step_key         = data.get("step_key", "")
-    step_label       = data.get("step_label", "")
-    section_index    = int(data.get("section_index", 0))
-    step_index       = int(data.get("step_index", 0))
-    min_seconds      = int(data.get("min_seconds", 0))
-    elapsed          = float(data.get("elapsed_seconds", 0))
-    clicked_at_local = data.get("clicked_at_local") or None
+    step_key      = data.get("step_key", "")
+    step_label    = data.get("step_label", "")
+    section_index = int(data.get("section_index", 0))
+    step_index    = int(data.get("step_index", 0))
+    min_seconds   = int(data.get("min_seconds", 0))
+    elapsed       = float(data.get("elapsed_seconds", 0))
 
     was_early = min_seconds > 0 and elapsed < min_seconds
     remaining = max(0, min_seconds - elapsed) if min_seconds > 0 else 0
@@ -408,7 +417,6 @@ def step_tap(session_id):
             min_seconds=min_seconds,
             elapsed_seconds=elapsed,
             was_early=was_early,
-            clicked_at_local=clicked_at_local,
         )
     except Exception as e:
         app.logger.warning(f"dwell event log failed: {e}")
@@ -473,7 +481,6 @@ def step_check(session_id):
                 section_index=section_index, step_index=step_index,
                 step_label=step_label, min_seconds=min_seconds,
                 elapsed_seconds=elapsed_seconds, was_early=True,
-                clicked_at_local=clicked_at_local,
             )
         except Exception:
             pass
@@ -498,8 +505,7 @@ def step_check(session_id):
         )
         if row is None:
             # Already exists — still OK
-            return jsonify({"success": True, "already_done": True,
-                            "utc_ts": None, "clicked_at_local": None})
+            return jsonify({"success": True, "already_done": True, "utc_ts": None})
 
         # Return as UTC ISO string; browser converts to local time via fmtUTC()
         ts = row["timestamp"]
@@ -509,11 +515,7 @@ def step_check(session_id):
             utc_ts = ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         else:
             utc_ts = None
-        return jsonify({
-            "success": True,
-            "utc_ts": utc_ts,
-            "clicked_at_local": row.get("clicked_at_local"),
-        })
+        return jsonify({"success": True, "utc_ts": utc_ts})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

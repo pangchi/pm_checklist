@@ -115,7 +115,6 @@ def init_db():
         checked          BOOLEAN DEFAULT TRUE,
         value_input      TEXT,
         photo_path       TEXT,
-        clicked_at_local TEXT,              -- ISO 8601 with local offset from browser
         timestamp        TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -156,7 +155,6 @@ def init_db():
         min_seconds      INTEGER NOT NULL DEFAULT 0,
         elapsed_seconds  FLOAT NOT NULL,
         was_early        BOOLEAN NOT NULL,
-        clicked_at_local TEXT,             -- ISO 8601 with local offset from browser
         tapped_at        TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_dwell_session ON step_dwell_events(session_id);
@@ -184,12 +182,7 @@ def init_db():
                 ALTER COLUMN {tbl_col[1]} TYPE TIMESTAMPTZ
                 USING {tbl_col[1]} AT TIME ZONE 'UTC'
             """)
-        # Migration: add clicked_at_local to checklist_events and step_dwell_events
-        for tbl in ("checklist_events", "step_dwell_events"):
-            cur.execute(f"""
-                ALTER TABLE {tbl}
-                ADD COLUMN IF NOT EXISTS clicked_at_local TEXT
-            """)
+        # clicked_at_local column retained in DB for forward compatibility (not actively written)
         # Migration: add corrective action columns to pm_sessions
         for col_def in [
             ("session_type",      "TEXT DEFAULT 'planned'"),
@@ -672,8 +665,7 @@ def get_all_settings() -> dict:
 
 def record_dwell_event(session_id: int, step_key: str, section_index: int,
                        step_index: int, step_label: str, min_seconds: int,
-                       elapsed_seconds: float, was_early: bool,
-                       clicked_at_local: str = None):
+                       elapsed_seconds: float, was_early: bool):
     """Log every step tap attempt for dwell-time analytics."""
     with get_conn() as conn:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -690,11 +682,11 @@ def record_dwell_event(session_id: int, step_key: str, section_index: int,
             """INSERT INTO step_dwell_events
                (session_id, personnel_id, wo_id, wo_number,
                 step_key, section_index, step_index, step_label,
-                min_seconds, elapsed_seconds, was_early, clicked_at_local)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+                min_seconds, elapsed_seconds, was_early)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
             (session_id, row["personnel_id"], row["wo_id"], row["wo_number"],
              step_key, section_index, step_index, step_label,
-             min_seconds, round(elapsed_seconds, 2), was_early, clicked_at_local)
+             min_seconds, round(elapsed_seconds, 2), was_early)
         )
         return cur.fetchone()
 
